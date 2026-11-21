@@ -18,7 +18,7 @@ Run a community hospital from 2024 to 2044 and **keep it open and fair**: stay s
 ```
 npm install
 npm run dev        # http://localhost:5173
-npm test           # 30 sim/data/teaching tests (vitest)
+npm test           # 29 sim/data/teaching tests (vitest)
 npm run build      # typecheck + production build
 ```
 Controls: WASD/arrows move, E interacts (desk, consoles, reception board, kiosk), Space pauses, M mutes, wheel zooms.
