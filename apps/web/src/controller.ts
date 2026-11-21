@@ -1,6 +1,7 @@
 import { audio, sfx } from './audio';
-import { buildQuestions, replay, scorecard, summarize, Simulation, type Question, type Scorecard, makeDemoAsset, validateAsset, deserialize, serialize, type Action, type ActionResult, type AnnualSnapshot, type ModelAsset, type SimEvent, type Visit } from '@hospital/sim';
+import { buildQuestions, replay, scorecard, summarize, Simulation, type Question, type Scorecard, makeDemoAsset, validateAsset, deserialize, type Action, type ActionResult, type AnnualSnapshot, type ModelAsset, type SimEvent, type Visit } from '@hospital/sim';
 
+export interface Literacy { asked: number; correct: number; grantsCents: number }
 const SAVE_KEY = 'ht2044-save-v1';
 const files = import.meta.glob('../../../packages/model-assets/derived/meps_baseline.json', { eager: true, import: 'default' }) as Record<string, unknown>;
 
@@ -30,7 +31,7 @@ export class Controller {
   sim: Simulation; asset: ModelAsset; assetError?: string;
   muted = false; showHelp = false; challenge = false;
   briefing: { year: number; questions: Question[]; picked: (number | null)[] } | null = null;
-  literacy = { asked: 0, correct: 0, grantsCents: 0 };
+  literacy: Literacy = { asked: 0, correct: 0, grantsCents: 0 };
   private autoplayAfterBriefing = false;
   paused = true; speed: (typeof SPEEDS)[number] = 1;
   report: AnnualSnapshot | null = null;   // year-end overlay
@@ -123,14 +124,19 @@ export class Controller {
   openTab(tab: string) { this.focusTab = tab; this.tabNonce++; this.emit(); }
   restart(seed?: number) { this.literacy = { asked: 0, correct: 0, grantsCents: 0 }; this.briefing = null; this.sim = Simulation.create(this.asset, seed ?? this.sim.state.config.seed, undefined, 'baseline', this.challenge); this.report = null; this.paused = true; this.events = []; this.messages = []; this.say('New game.'); this.emit(); }
 
-  save() { try { localStorage.setItem(SAVE_KEY, serialize(this.sim.state)); } catch { /* storage unavailable */ } }
+  /** Saves and exports share one envelope: the simulation state plus the player's MEPS briefing score. */
+  private envelope(): string { return JSON.stringify({ app: 'hospital-tycoon', v: 2, state: this.sim.state, literacy: this.literacy }); }
+  save() { try { localStorage.setItem(SAVE_KEY, this.envelope()); } catch { /* storage unavailable */ } }
   hasSave(): boolean { try { return !!localStorage.getItem(SAVE_KEY); } catch { return false; } }
   load(json?: string): boolean {
     try {
       const raw = json ?? localStorage.getItem(SAVE_KEY); if (!raw) return false;
-      const st = deserialize(raw); this.challenge = st.events; this.sim = new Simulation(this.asset, st); this.report = null; this.paused = true; this.events = [];
+      const obj = JSON.parse(raw) as { state?: unknown; literacy?: Partial<Literacy> };   // v2 envelope, or a bare v1 state
+      const st = deserialize(obj.state ? JSON.stringify(obj.state) : raw);
+      const lit = obj.literacy; if (lit && [lit.asked, lit.correct, lit.grantsCents].every((n) => Number.isFinite(n))) this.literacy = { asked: lit.asked!, correct: lit.correct!, grantsCents: lit.grantsCents! };
+      this.challenge = st.events; this.sim = new Simulation(this.asset, st); this.report = null; this.briefing = null; this.paused = true; this.events = [];
       this.say(`Loaded save (${st.year}).`); this.emit(); return true;
     } catch (e) { this.say(`Could not load save: ${(e as Error).message}`); this.emit(); return false; }
   }
-  exportJson(): string { return serialize(this.sim.state); }
+  exportJson(): string { return this.envelope(); }
 }

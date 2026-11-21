@@ -129,3 +129,6 @@ kbd { font: inherit; color: var(--text); border: 1px solid var(--line); border-r
 @media (max-width: 480px) { .modal { padding: 22px; } .modal h2 { font-size: 1.4rem; } .stage-heading { flex-wrap: wrap; } .stage-help { gap: 8px; } .panel-body { padding: 12px; } }
 @media (pointer: coarse) { button { min-height: 44px; min-width: 44px; } }
 @media (prefers-reduced-motion: reduce) { button { transition: none; } }
+
+/* keep the primary action reachable on short screens */
+.modal > .row:last-child { position: sticky; bottom: -32px; margin: 18px -32px -32px; padding: 14px 32px; background: var(--panel); border-top: 1px solid var(--line); }

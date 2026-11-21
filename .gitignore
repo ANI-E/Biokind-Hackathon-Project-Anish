@@ -7,3 +7,7 @@ data/processed/
 *.log
 .DS_Store
 .env
+
+.capture/
+.playwright-cli/
+output/playwright/
