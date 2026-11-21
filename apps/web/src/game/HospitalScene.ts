@@ -32,7 +32,8 @@ export class HospitalScene extends Phaser.Scene {
   private overflow: Partial<Record<Dept, Phaser.GameObjects.Text>> = {};
   private ring!: Phaser.GameObjects.Graphics;
   private reconTimer = 0; private staffSig = '';
-  private t = 0; private interactQueued = false;
+  private selPop = 0; private t = 0; private interactQueued = false;
+  private focus: typeof INTERACT[number] | null = null; private focusRing!: Phaser.GameObjects.Graphics;
 
   constructor() { super('Hospital'); }
 
@@ -55,13 +56,13 @@ export class HospitalScene extends Phaser.Scene {
     const e = proj(ENTRANCE.x + 0.5, ENTRANCE.y + 0.5); this.add.text(e.x, e.y - 40, '▼ ENTRANCE', { fontFamily: 'monospace', fontSize: '14px', color: '#fff', backgroundColor: '#15803dcc', padding: { x: 4, y: 2 } }).setResolution(2).setOrigin(0.5).setDepth(9e5);
     const w = proj(25, 8); this.wardSign = this.add.text(w.x, w.y, '', { fontFamily: 'monospace', fontSize: '14px', color: '#fef3c7', backgroundColor: '#7c2d12dd', padding: { x: 5, y: 3 }, align: 'center' }).setResolution(2).setOrigin(0.5).setDepth(9e5);
     DEPTS.forEach((d) => { const s = queueSpots(d)[QUEUE_CAP - 1], p = proj(s.x + 0.5, s.y + 1.2); this.overflow[d] = this.add.text(p.x, p.y, '', { fontFamily: 'monospace', fontSize: '13px', color: '#7f1d1d', backgroundColor: '#fee2e2cc', padding: { x: 3, y: 1 } }).setResolution(2).setOrigin(0.5).setDepth(9e5); });
-    this.ring = this.add.graphics().setDepth(8e5);
+    this.ring = this.add.graphics().setDepth(8e5); this.focusRing = this.add.graphics().setDepth(8e5);
     this.player = this.makePerson('admin', this.pg.x, this.pg.y);
     this.prompt = this.add.text(0, 0, '', { fontFamily: 'monospace', fontSize: '15px', color: '#fff', backgroundColor: '#0f172aee', padding: { x: 5, y: 3 } }).setResolution(2).setDepth(9.5e5).setVisible(false);
-    const cam = this.cameras.main; cam.setBounds(0, 0, WORLD_W, WORLD_H); cam.setZoom(0.72); cam.startFollow(this.player.spr, true, 0.12, 0.12);
+    const cam = this.cameras.main; cam.setBounds(0, 0, WORLD_W, WORLD_H); cam.setZoom(0.72); cam.startFollow(this.player.spr, true, 0.25, 0.25);
     this.input.on('wheel', (_p: unknown, _o: unknown, _dx: number, dy: number) => cam.setZoom(clamp(cam.zoom - dy * 0.001, 0.55, 1.6)));
     this.input.on('pointerdown', (_p: Phaser.Input.Pointer, over: Phaser.GameObjects.GameObject[]) => {
-      const hit = over.find((o) => o.getData('vid')); if (hit) this.ctl.select(this.people.get(hit.getData('vid'))?.visit ?? null); else if (!over.length) this.ctl.select(null);
+      const hit = over.find((o) => o.getData('vid')); if (hit) { this.ctl.select(this.people.get(hit.getData('vid'))?.visit ?? null); this.selPop = 1; sfx.ui(); } else if (!over.length) this.ctl.select(null);
     });
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.keys = this.input.keyboard!.addKeys('W,A,S,D,E,SPACE,M') as Record<string, Phaser.Input.Keyboard.Key>;
@@ -95,9 +96,17 @@ export class HospitalScene extends Phaser.Scene {
     const dt = Math.min(dtMs, 100) / 1000; this.t += dt;
     this.movePlayer(dt);
     // interactions
-    const near = INTERACT.find((o) => Math.hypot(this.pg.x - (o.x + 0.5), this.pg.y - (o.y + 0.5)) < 1.9);
-    if (near) { const s = proj(this.pg.x, this.pg.y); this.prompt.setText(`E: ${near.label}`).setPosition(s.x - 70, s.y - 60).setVisible(true); if (this.interactQueued) { sfx.ui(); this.ctl.openTab(near.tab); } }
-    else this.prompt.setVisible(false);
+    let near: typeof INTERACT[number] | null = null, best = 1.9;
+    for (const o of INTERACT) { const d = Math.hypot(this.pg.x - (o.x + 0.5), this.pg.y - (o.y + 0.5)); if (d < best) { best = d; near = o; } }
+    if (near !== this.focus) {
+      this.focus = near;
+      if (near) { this.prompt.setScale(0.6).setAlpha(0); this.tweens.add({ targets: this.prompt, scale: 1, alpha: 1, duration: 110, ease: 'Back.Out' }); }
+    }
+    this.drawFocus(near);
+    if (near) {
+      const s = proj(near.x + 0.5, near.y + 0.5); this.prompt.setText(`[E] ${near.label}`).setOrigin(0.5, 1).setPosition(Math.round(s.x), Math.round(s.y - 64)).setVisible(true);
+      if (this.interactQueued) { sfx.ui(); this.ctl.openTab(near.tab); this.pulse(s.x, s.y); }
+    } else this.prompt.setVisible(false);
     this.interactQueued = false;
     // outcome events -> popups / sounds
     const ev = this.ctl.events.splice(0, this.ctl.events.length);
@@ -144,20 +153,35 @@ export class HospitalScene extends Phaser.Scene {
     const U = this.cursors.up.isDown || this.keys.W.isDown, D = this.cursors.down.isDown || this.keys.S.isDown;
     let vx = (R ? 1 : 0) - (L ? 1 : 0), vy = (D ? 1 : 0) - (U ? 1 : 0); const moving = vx !== 0 || vy !== 0;
     if (moving) {
-      const n = Math.hypot(vx, vy); vx = (vx / n) * 150 * dt; vy = (vy / n) * 150 * dt;       // screen pixels this frame
+      const n = Math.hypot(vx, vy); vx = (vx / n) * 170 * dt; vy = (vy / n) * 170 * dt;       // screen pixels this frame
       const dgx = (vx / 32 + vy / 16) / 2, dgy = (vy / 16 - vx / 32) / 2, r = 0.22;
       const ok = (x: number, y: number) => walkable(this.tiles, Math.floor(x - r), Math.floor(y - r)) && walkable(this.tiles, Math.floor(x + r), Math.floor(y - r)) && walkable(this.tiles, Math.floor(x - r), Math.floor(y + r)) && walkable(this.tiles, Math.floor(x + r), Math.floor(y + r));
       if (ok(this.pg.x + dgx, this.pg.y)) this.pg.x += dgx;
       if (ok(this.pg.x, this.pg.y + dgy)) this.pg.y += dgy;
     }
+    if (!moving) { this.pg.x = Math.round(this.pg.x * 64) / 64; this.pg.y = Math.round(this.pg.y * 64) / 64; }   // settle on a pixel-grid so stops are crisp
     this.player.px = this.pg.x; this.player.py = this.pg.y; this.player.path = moving ? [{ x: 0, y: 0 }] : [];
     this.place(this.player); this.player.path = [];
+  }
+
+  /** snap-highlight the interactable in range with a pulsing tile outline */
+  private drawFocus(o: typeof INTERACT[number] | null) {
+    this.focusRing.clear(); if (!o) return;
+    const c = proj(o.x + 0.5, o.y + 0.5), a = 0.6 + 0.4 * Math.sin(this.t * 8);
+    this.focusRing.lineStyle(3, 0xfacc15, a).strokePoints([{ x: c.x, y: c.y - 16 }, { x: c.x + 32, y: c.y }, { x: c.x, y: c.y + 16 }, { x: c.x - 32, y: c.y }], true);
+  }
+  /** quick expanding ring when an interaction fires */
+  private pulse(x: number, y: number) {
+    const g = this.add.graphics().setDepth(9.4e5).setPosition(x, y); g.lineStyle(3, 0xffffff, 1).strokeEllipse(0, 0, 64, 32);
+    this.tweens.add({ targets: g, scale: 1.8, alpha: 0, duration: 260, ease: 'Cubic.Out', onComplete: () => g.destroy() });
+    this.cameras.main.shake(70, 0.0016);
   }
 
   private drawRing() {
     this.ring.clear(); const sel = this.ctl.selected; if (!sel) return;
     const p = this.people.get(sel.id); if (!p) return; const s = proj(p.px, p.py);
-    this.ring.lineStyle(3, 0xfacc15, 1).strokeEllipse(s.x, s.y, 34, 17);
+    this.selPop = Math.max(0, this.selPop - 0.09); const k = 1 + this.selPop * 0.6;
+    this.ring.lineStyle(3, 0xfacc15, 1).strokeEllipse(s.x, s.y, 34 * k, 17 * k);
   }
 
   private syncBeds() {
