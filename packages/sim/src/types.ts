@@ -27,10 +27,10 @@ export interface Department {
 
 export type LedgerCategory =
   | 'revenue.emergency' | 'revenue.outpatient' | 'revenue.inpatient' | 'revenue.grant'
-  | 'cost.payroll' | 'cost.upkeep' | 'cost.variable' | 'cost.overhead' | 'cost.capital' | 'cost.subsidy' | 'cost.process' | 'cost.penalty';
+  | 'cost.payroll' | 'cost.upkeep' | 'cost.variable' | 'cost.overhead' | 'cost.capital' | 'cost.subsidy' | 'cost.process' | 'cost.penalty' | 'cost.decision';
 export const LEDGER_CATEGORIES: LedgerCategory[] = [
   'revenue.emergency', 'revenue.outpatient', 'revenue.inpatient', 'revenue.grant', 'cost.payroll', 'cost.upkeep', 'cost.variable',
-  'cost.overhead', 'cost.capital', 'cost.subsidy', 'cost.process', 'cost.penalty'];
+  'cost.overhead', 'cost.capital', 'cost.subsidy', 'cost.process', 'cost.penalty', 'cost.decision'];
 export type LedgerTotals = Record<LedgerCategory, number>;
 export interface LedgerEntry { tick: number; category: LedgerCategory; cents: number; ref: string; }
 
@@ -54,6 +54,7 @@ export interface AnnualSnapshot {
   patientOopCents: number; subsidizedOopCents: number; avgOopPerVisitCents: number;
   decisions: string[];
   event: string | null;
+  reputation: number;
   provenance: ModelProvenance[];
 }
 
@@ -63,11 +64,20 @@ export type Action =
   | { type: 'addRoom'; service: PlayableService }
   | { type: 'setProcessLevel'; level: number }
   | { type: 'setSubsidy'; budgetCents: number }
-  | { type: 'grant'; cents: number; reason: string };
+  | { type: 'grant'; cents: number; reason: string }
+  | { type: 'setPolicy'; medicaidAccess: MedicaidAccess }
+  | { type: 'decide'; cardId: string; optionId: string };
 export interface ActionResult { ok: boolean; error?: string; }
+
+/** Elective (non-emergency) access policy for Medicaid and uninsured patients. ER care can never be refused. */
+export type MedicaidAccess = 'full' | 'limited';
+export type ModifierKind = 'arrivalMult' | 'paymentMult' | 'wageMult' | 'overheadMult' | 'serviceTimeMult' | 'capacityMult';
+/** A lasting effect of a decision, active through `untilYear` (inclusive). */
+export interface Modifier { id: string; label: string; kind: ModifierKind; service: PlayableService | 'all'; payer?: PayerGroup; value: number; untilYear: number; }
+export interface DecisionLogEntry { year: number; cardId: string; title: string; optionId: string; optionLabel: string; deferred: boolean; failed: boolean; text: string; cashCents: number; trustDelta: number; }
 
 export type SimEvent =
   | { type: 'arrive'; tick: number; visit: Visit }
   | { type: 'start'; tick: number; visit: Visit; waitTicks: number }
   | { type: 'complete'; tick: number; visit: Visit; revenueCents: number }
-  | { type: 'leave'; tick: number; visit: Visit; reason: 'diverted' | 'left_unseen' };
+  | { type: 'leave'; tick: number; visit: Visit; reason: 'diverted' | 'left_unseen' | 'declined' };

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { END_YEAR, Simulation, makeRng, next, scorecard, replay, summarize, buildQuestions, coachTips, makeDemoAsset, serialize, validateAsset, type Action } from '../src';
+import { CARDS, END_YEAR, Simulation, describeOption, getCard, makeRng, next, scorecard, type SimEvent, replay, summarize, buildQuestions, coachTips, makeDemoAsset, serialize, validateAsset, type Action } from '../src';
 import { loadAsset } from './helpers';
 
 const asset = loadAsset();
@@ -30,12 +30,12 @@ describe('reproducibility', () => {
     const b = Simulation.create(asset, 2); b.advance(2000);
     expect(serialize(a.state)).not.toBe(serialize(b.state));
   });
-  it('arrivals are identical regardless of player decisions (common random numbers)', () => {
+  it('demand is the same until trust diverges: staffing choices cannot change arrivals within the first month', () => {
     const a = Simulation.create(asset, 7), b = Simulation.create(asset, 7);
     b.applyAction({ type: 'hire', service: 'emergency', role: 'nurse', count: 6 });
     b.applyAction({ type: 'setProcessLevel', level: 2 });
-    a.runToYearEnd(); b.runToYearEnd();
-    expect(a.state.snapshots[0].arrivals).toEqual(b.state.snapshots[0].arrivals);
+    a.advance(700); b.advance(700);
+    expect(a.state.yearAcc.arrivals).toEqual(b.state.yearAcc.arrivals);
   });
 });
 
@@ -200,7 +200,7 @@ describe('challenge events & scorecard', () => {
   it('scorecard: bankrupt scores 0 on finance and weights sum to a 0-100 total with a letter grade', () => {
     const s = Simulation.create(asset, 1); s.runToEnd();
     const sc = scorecard(s.state.snapshots, s.a, { bankrupt: s.state.bankrupt, finished: s.state.finished, dataIq: { asked: 4, correct: 3 } });
-    expect(sc.objectives.length).toBe(6); expect(sc.total).toBeGreaterThanOrEqual(0); expect(sc.total).toBeLessThanOrEqual(100); expect('ABCDF').toContain(sc.grade);
+    expect(sc.objectives.length).toBe(7); expect(sc.total).toBeGreaterThanOrEqual(0); expect(sc.total).toBeLessThanOrEqual(100); expect('ABCDF').toContain(sc.grade);
     expect(sc.objectives.find((o) => o.id === 'finance')!.score).toBe(s.state.bankrupt ? 0 : sc.objectives.find((o) => o.id === 'finance')!.score);
   });
   it('a sensible strategy out-scores doing nothing', () => {
@@ -272,5 +272,96 @@ describe('randomised stress', () => {
       }
       expect(JSON.stringify(s.state.snapshots.map(({ event: _e, ...x }) => x))).not.toMatch(/NaN|Infinity|null/);
     }
+  });
+});
+
+
+describe('decisions, policies and trust', () => {
+  const rich = () => ({ ...Simulation.create(asset, 1).a, startingCashCents: 10 ** 11 });
+
+  it('every option of every card applies cleanly in several years and keeps the books balanced', () => {
+    for (const card of CARDS) for (const opt of card.options) for (const year of [0, 3, 9]) {
+      const s = Simulation.create(asset, 5 + year, rich());
+      for (let y = 0; y < year; y++) s.runToYearEnd();
+      s.state.pendingCard = { cardId: card.id, year: s.state.year };   // force this card regardless of the draw
+      const r = s.applyAction({ type: 'decide', cardId: card.id, optionId: opt.id });
+      expect(r.ok, `${card.id}/${opt.id}`).toBe(true);
+      expect(s.state.pendingCard).toBeNull(); expect(s.state.decisionLog.at(-1)!.optionId).toBe(opt.id);
+      expect(s.checkInvariants()).toEqual([]); s.runToYearEnd();
+      expect(JSON.stringify(s.state.snapshots.map(({ event: _e, ...x }) => x))).not.toMatch(/NaN|Infinity|null/);
+      expect(Array.isArray(describeOption(opt).effects)).toBe(true);   // may be empty for a do-nothing option
+    }
+  });
+  it('a dilemma is waiting from the start, is deterministic for a seed, and can only be answered once', () => {
+    const a = Simulation.create(asset, 11), b = Simulation.create(asset, 11);
+    expect(a.state.pendingCard).not.toBeNull(); expect(a.state.pendingCard).toEqual(b.state.pendingCard);
+    const card = getCard(a.state.pendingCard!.cardId)!, first = card.options[0].id;
+    expect(a.applyAction({ type: 'decide', cardId: 'nope', optionId: first }).ok).toBe(false);
+    a.state.cashCents = Math.max(a.state.cashCents, card.options[0].upfrontCents);
+    expect(a.applyAction({ type: 'decide', cardId: card.id, optionId: first }).ok).toBe(true);
+    expect(a.applyAction({ type: 'decide', cardId: card.id, optionId: first }).ok).toBe(false);
+  });
+  it('rejects an option the hospital cannot afford', () => {
+    const s = Simulation.create(asset, 3); const card = CARDS.find((c) => c.id === 'imaging')!; s.state.pendingCard = { cardId: card.id, year: 2024 };
+    s.state.cashCents = 1000; expect(s.applyAction({ type: 'decide', cardId: 'imaging', optionId: 'buy' }).ok).toBe(false); expect(s.state.pendingCard).not.toBeNull();
+  });
+  it('leaving a dilemma unanswered defers it to its default option, recorded as deferred, and a new one arrives', () => {
+    const s = Simulation.create(asset, 4, rich()); const first = s.state.pendingCard!.cardId; s.runToYearEnd();
+    const e = s.state.decisionLog[0]; expect(e.cardId).toBe(first); expect(e.deferred).toBe(true); expect(e.optionId).toBe(getCard(first)!.defaultOptionId);
+    expect(s.state.pendingCard).not.toBeNull(); expect(s.state.pendingCard!.year).toBe(2025);
+  });
+  it('seeded setbacks are the same for the same seed, so comparisons stay fair', () => {
+    const run = () => { const s = Simulation.create(asset, 9, rich()); s.state.pendingCard = { cardId: 'nurse-contract', year: 2024 }; s.applyAction({ type: 'decide', cardId: 'nurse-contract', optionId: 'hold' }); return s.state.decisionLog[0].failed; };
+    expect(run()).toBe(run());
+  });
+  it('a payment-cut modifier lowers Medicaid payments, then expires', () => {
+    const base = Simulation.create(asset, 6, rich()), cut = Simulation.create(asset, 6, rich());
+    cut.state.pendingCard = { cardId: 'medicaid-cut', year: 2024 }; cut.applyAction({ type: 'decide', cardId: 'medicaid-cut', optionId: 'absorb' });
+    expect(cut.state.modifiers.length).toBe(1); expect(cut.state.modifiers[0].untilYear).toBe(2027);
+    base.advance(2000); cut.advance(2000);
+    const avg = (x: Simulation) => { const g = x.state.yearAcc.byPayer.medicaid; return g.treated ? (x.state.ledger['revenue.emergency'] + x.state.ledger['revenue.outpatient']) / Math.max(1, x.state.yearAcc.treated.emergency + x.state.yearAcc.treated.outpatient) : 0; };
+    expect(avg(cut)).toBeLessThan(avg(base));
+    for (let y = 0; y < 4; y++) cut.runToYearEnd();
+    expect(cut.state.modifiers.some((m) => m.label === 'State Medicaid rate cut')).toBe(false);
+  });
+  it('limiting elective Medicaid/uninsured access turns patients away from the clinic and ward but never the ER', () => {
+    const open = Simulation.create(asset, 8, rich()), lim = Simulation.create(asset, 8, rich());
+    for (const s of [open, lim]) { s.state.departments.inpatient.roomSlots = 6; s.state.departments.inpatient.physicians = 5; s.state.departments.inpatient.nurses = 9; }
+    lim.applyAction({ type: 'setPolicy', medicaidAccess: 'limited' });
+    let declinedEr = 0, declinedOther = 0; const seen = (e: SimEvent) => { if (e.type === 'leave' && e.reason === 'declined') { if (e.visit.service === 'emergency') declinedEr++; else declinedOther++; } };
+    open.advance(690); lim.advance(690, { onEvent: seen });
+    expect(declinedEr).toBe(0); expect(declinedOther).toBeGreaterThan(5);
+    expect(lim.state.yearAcc.unmet.outpatient).toBeGreaterThan(open.state.yearAcc.unmet.outpatient);
+    expect(Math.abs(lim.state.yearAcc.arrivals.emergency / open.state.yearAcc.arrivals.emergency - 1)).toBeLessThan(0.25);   // ER demand only moves through the small trust effect
+    expect(lim.state.reputation).toBeLessThan(open.state.reputation);
+  });
+  it('trust follows service quality: an unstaffed hospital loses trust, a well-run one gains it, and demand follows', () => {
+    const bad = Simulation.create(asset, 2, rich()), good = Simulation.create(asset, 2, rich());
+    for (const sv of ['emergency', 'outpatient'] as const) { bad.state.departments[sv].nurses = 0; bad.state.departments[sv].physicians = 0; }
+    good.applyAction({ type: 'hire', service: 'emergency', role: 'physician', count: 6 }); good.applyAction({ type: 'hire', service: 'emergency', role: 'nurse', count: 9 });
+    bad.runToYearEnd(); good.runToYearEnd();
+    expect(bad.state.reputation).toBeLessThan(50); expect(good.state.reputation).toBeGreaterThan(bad.state.reputation + 10);
+    bad.runToYearEnd(); good.runToYearEnd();
+    expect(bad.state.snapshots[1].arrivals.emergency).toBeLessThan(good.state.snapshots[1].arrivals.emergency);
+  });
+  it('replaying a game with decisions reproduces it exactly', () => {
+    const cfg = rich(), a = Simulation.create(asset, 21, cfg);
+    for (let y = 0; y < 4; y++) { const pc = a.state.pendingCard!; const card = getCard(pc.cardId)!; a.applyAction({ type: 'decide', cardId: card.id, optionId: card.options[card.options.length - 1].id }); a.runToYearEnd(); }
+    const b = replay(asset, 21, a.state.actionLog, a.state.snapshots.length, cfg);
+    expect(JSON.stringify(b.state.snapshots)).toBe(JSON.stringify(a.state.snapshots));
+    expect(b.state.reputation).toBe(a.state.reputation); expect(b.state.decisionLog).toEqual(a.state.decisionLog);
+  });
+  it('decisions change the outcome: a thoughtful run beats doing nothing and a run that turns patients away', () => {
+    const cfg = { ...Simulation.create(asset, 1).a, startingCashCents: 300000000 };
+    const play = (strategy: 'nothing' | 'thoughtful' | 'greedy') => {
+      const s = Simulation.create(asset, 3, cfg);
+      if (strategy !== 'nothing') coachTips(s).find((t) => t.id === 'ward-closed')?.apply!.actions.forEach((a) => s.applyAction(a));
+      if (strategy === 'greedy') s.applyAction({ type: 'setPolicy', medicaidAccess: 'limited' });
+      const pick = (id: string) => (strategy === 'thoughtful' ? ({ 'medicaid-cut': 'lobby', 'nurse-contract': 'raise', 'free-clinic': 'fund', 'charity-policy': 'adopt', 'equity-press': 'invest', 'er-crisis': 'protocol', imaging: 'buy' } as Record<string, string>)[id] : undefined);
+      while (!s.state.finished && !s.state.bankrupt) { const pc = s.state.pendingCard; const opt = pc && pick(pc.cardId); if (pc && opt) s.applyAction({ type: 'decide', cardId: pc.cardId, optionId: opt }); s.advance(8760, { stopAtYearEnd: true }); }
+      return scorecard(s.state.snapshots, s.a, { bankrupt: s.state.bankrupt, finished: s.state.finished, dataIq: { asked: 0, correct: 0 } }).total;
+    };
+    const [nothing, thoughtful, greedy] = [play('nothing'), play('thoughtful'), play('greedy')];
+    expect(thoughtful).toBeGreaterThan(nothing); expect(thoughtful).toBeGreaterThan(greedy);
   });
 });

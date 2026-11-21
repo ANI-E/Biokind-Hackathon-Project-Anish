@@ -23,7 +23,7 @@ export function buildSnapshot(s: SimState, asset: ModelAsset, populationSize: nu
     unmetDemand: sum(acc.unmet),
     byPayer: acc.byPayer, byIncome: acc.byIncome, patientOopCents: acc.oop, subsidizedOopCents: acc.subsidized,
     avgOopPerVisitCents: treatedAll ? Math.round(acc.oop / treatedAll) : 0,
-    decisions: [...s.decisionsThisYear], event: s.yearEvent?.label ?? null,
+    decisions: [...s.decisionsThisYear], event: s.yearEvent?.label ?? null, reputation: Math.round(s.reputation * 10) / 10,
     provenance: [...assetProvenance(asset),
       { kind: 'MODEL_ASSUMPTION', sourceId: 'default-assumptions.json', method: 'Hospital share, staffing, unit costs, scenario drift', assumptions: ['Not survey findings'] },
       { kind: 'SIMULATED', sourceId: 'sim', method: 'Queue/capacity outcomes after player decisions' }],

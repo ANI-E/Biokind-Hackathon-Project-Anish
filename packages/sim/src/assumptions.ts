@@ -10,13 +10,14 @@ export interface Assumptions {
   costs: {
     physicianSalaryCents: number; nurseSalaryCents: number;
     roomUpkeepPerYearCents: Record<PlayableService, number>; roomBuildCostCents: Record<PlayableService, number>;
-    variableCostPerEncounterCents: Record<PlayableService, number>; overheadPerYearCents: number;
+    variableCostPerEncounterCents: Record<PlayableService, number>; overheadPerYearCents: number; overheadShareOfRevenue: number;
     processImprovementCostCents: number[]; processImprovementUpkeepCents: number[]; processImprovementServiceTimeMultiplier: number[];
   };
   queue: { emergencyDiversionWaitTicks: number; inpatientDiversionWaitTicks: number; divertedPenaltyCents: Record<'emergency' | 'inpatient', number>; outpatientLeaveWaitTicks: number };
   hiring: { maxPerDepartment: number };
   events: { list: EventDef[] };
-  scoring: { weights: Record<'finance' | 'access' | 'safety' | 'equity' | 'affordability' | 'dataIq', number> };
+  scoring: { weights: Record<'finance' | 'access' | 'safety' | 'equity' | 'affordability' | 'trust' | 'dataIq', number> };
+  trust: { start: number; monthlyRate: number; minFactor: number; spanFactor: number; declineShareOfLimitedAccess: number };
   scenario: {
     populationGrowthPerYear: number; utilizationDriftPerYear: number; medicalPriceInflationPerYear: number;
     wageInflationPerYear: number; generalInflationPerYear: number;

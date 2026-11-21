@@ -2,12 +2,12 @@
 import type { Assumptions } from './assumptions';
 import type { AnnualSnapshot } from './types';
 
-export interface Objective { id: 'finance' | 'access' | 'safety' | 'equity' | 'affordability' | 'dataIq'; label: string; score: number; detail: string; target: string }
+export interface Objective { id: 'finance' | 'access' | 'safety' | 'equity' | 'affordability' | 'trust' | 'dataIq'; label: string; score: number; detail: string; target: string }
 export interface Scorecard { objectives: Objective[]; total: number; grade: string; years: number; survived: boolean }
 const clamp = (x: number, a = 0, b = 100) => Math.max(a, Math.min(b, x));
 export const gradeOf = (t: number) => (t >= 90 ? 'A' : t >= 80 ? 'B' : t >= 70 ? 'C' : t >= 60 ? 'D' : 'F');
 
-export function scorecard(snaps: AnnualSnapshot[], a: Assumptions, ctx: { bankrupt: boolean; finished: boolean; dataIq: { asked: number; correct: number } }): Scorecard {
+export function scorecard(snaps: AnnualSnapshot[], a: Assumptions, ctx: { bankrupt: boolean; finished: boolean; dataIq: { asked: number; correct: number }; reputation?: number }): Scorecard {
   const sum = (f: (s: AnnualSnapshot) => number) => snaps.reduce((t, s) => t + f(s), 0);
   const arrivals = sum((s) => s.arrivals.emergency + s.arrivals.outpatient + s.arrivals.inpatient), treated = sum((s) => s.treated.emergency + s.treated.outpatient + s.treated.inpatient);
   const diverted = sum((s) => s.unmet.emergency + s.unmet.inpatient), safetyArr = sum((s) => s.arrivals.emergency + s.arrivals.inpatient);
@@ -27,6 +27,7 @@ export function scorecard(snaps: AnnualSnapshot[], a: Assumptions, ctx: { bankru
   // affordability: share of low-income patient out-of-pocket cost relieved by the assistance fund (40 baseline, 100 at 50% relieved)
   const low = (s: AnnualSnapshot) => s.byIncome['<200%FPL']; const oop = sum((s) => low(s)?.oopCents ?? 0), rel = sum((s) => low(s)?.subsidizedOopCents ?? 0);
   const relieved = oop + rel > 0 ? rel / (oop + rel) : 0; const afford = clamp(40 + 60 * Math.min(1, relieved / 0.5));
+  const trust = clamp(ctx.reputation ?? snaps.at(-1)?.reputation ?? a.trust.start);
   const dataIq = ctx.dataIq.asked ? (ctx.dataIq.correct / ctx.dataIq.asked) * 100 : 50;
   const w = a.scoring.weights;
   const objectives: Objective[] = [
@@ -35,6 +36,7 @@ export function scorecard(snaps: AnnualSnapshot[], a: Assumptions, ctx: { bankru
     { id: 'safety', label: 'Emergency safety', score: safety, target: 'Divert <1% of ER and ward patients (0 = perfect, 10% = zero score)', detail: `${(divRate * 100).toFixed(1)}% transferred away` },
     { id: 'equity', label: 'Equity', score: equity, target: 'Keep average waits similar across insurance groups', detail: waits.length > 1 ? `${spread.toFixed(1)} h gap between slowest and fastest group` : 'Not enough data yet' },
     { id: 'affordability', label: 'Affordability', score: afford, target: 'Relieve out-of-pocket costs for low-income patients', detail: `${(relieved * 100).toFixed(0)}% of low-income out-of-pocket relieved` },
+    { id: 'trust', label: 'Community trust', score: trust, target: 'Earn the community’s trust by serving everyone well', detail: `Trust ${trust.toFixed(0)}/100` },
     { id: 'dataIq', label: 'Data IQ', score: dataIq, target: 'Answer MEPS briefing questions correctly', detail: ctx.dataIq.asked ? `${ctx.dataIq.correct}/${ctx.dataIq.asked} correct` : 'No questions answered' },
   ];
   const total = objectives.reduce((t, o) => t + o.score * w[o.id], 0) / Object.values(w).reduce((x, y) => x + y, 0);

@@ -3,10 +3,12 @@ import type { EventDist, ModelAsset, PaymentDist } from './assets';
 import { arrivalProfiles } from './arrivals';
 import { buildSnapshot } from './snapshot';
 import { freshAcc, groupsOf, totalCosts, totalRevenue, zeroLedger, type YearAcc } from './stats';
+import { getCard, hash01, modifierFromDef, pickCard, type CardOption, type DecisionCard, type Outcome } from './cards';
+import { nextTrust, takeMonthBase, trustFactor, trustTarget, type MonthBase } from './reputation';
 import { makeRng, next, pickCumulative, poisson, type RngState } from './rng';
 import {
   PLAYABLE, type Action, type ActionResult, type ActiveVisit, type AnnualSnapshot, type Department, type LedgerCategory, type LedgerEntry,
-  type LedgerTotals, type PlayableService, type ServiceMap, type SimEvent, type SyntheticPatient, type Visit,
+  type DecisionLogEntry, type LedgerTotals, type MedicaidAccess, type Modifier, type PayerGroup, type PlayableService, type ServiceMap, type SimEvent, type SyntheticPatient, type Visit,
 } from './types';
 
 export const START_YEAR = 2024;
@@ -30,9 +32,17 @@ export interface SimState {
   snapshots: AnnualSnapshot[];
   decisionsThisYear: string[];
   actionLog: { tick: number; action: Action }[];
+  /** Community trust 0-100: scales demand and is part of the final grade. */
+  reputation: number;
+  policies: { medicaidAccess: MedicaidAccess };
+  modifiers: Modifier[];
+  /** The board-meeting dilemma awaiting a decision (auto-deferred to its default if still open when the year closes). */
+  pendingCard: { cardId: string; year: number } | null;
+  decisionLog: DecisionLogEntry[];
+  monthBase: MonthBase;
 }
 export function createInitialState(cfg: Partial<Config> & { seed: number }): SimState {
-  const a = cfg.assumptions ?? DEFAULT_ASSUMPTIONS;
+  const a = cfg.assumptions ?? DEFAULT_ASSUMPTIONS, acc = freshAcc();
   const dept = (service: PlayableService, rooms: number, phys: number, nurses: number): Department =>
     ({ id: service, service, roomSlots: rooms, physicians: phys, nurses, queue: [], inService: [], capacityCredit: 0 });
   return {
@@ -42,7 +52,9 @@ export function createInitialState(cfg: Partial<Config> & { seed: number }): Sim
     rng: makeRng(cfg.seed), nextVisitId: 1,
     departments: { emergency: dept('emergency', 3, 5, 9), outpatient: dept('outpatient', 3, 4, 4), inpatient: dept('inpatient', 0, 0, 0) },
     processLevel: 0, subsidyBudgetCents: 0, subsidyRemainingCents: 0,
-    ledger: zeroLedger(), recent: [], yearAcc: freshAcc(), snapshots: [], decisionsThisYear: [], actionLog: [],
+    ledger: zeroLedger(), recent: [], yearAcc: acc, snapshots: [], decisionsThisYear: [], actionLog: [],
+    reputation: a.trust.start, policies: { medicaidAccess: 'full' }, modifiers: [], decisionLog: [], monthBase: takeMonthBase(acc),
+    pendingCard: { cardId: pickCard(cfg.seed, START_YEAR, [], {}).id, year: START_YEAR },
   };
 }
 
@@ -58,6 +70,9 @@ export class Simulation {
   private modelYear = -1;
   private oopShare: Record<string, number> = {};
   private readonly profiles: ServiceMap<number[]>;
+  /** Combined effect of trust and active decision modifiers; rebuilt whenever either changes. */
+  private fx = { arrival: { emergency: 1, outpatient: 1, inpatient: 1 } as ServiceMap<number>, service: { emergency: 1, outpatient: 1, inpatient: 1 } as ServiceMap<number>,
+    capacity: { emergency: 1, outpatient: 1, inpatient: 1 } as ServiceMap<number>, wage: 1, overhead: 1, payment: [] as Modifier[] };
 
   constructor(asset: ModelAsset, state: SimState, assumptions: Assumptions = DEFAULT_ASSUMPTIONS) {
     this.asset = asset; this.state = state; this.a = assumptions; this.profiles = arrivalProfiles(assumptions);
@@ -104,6 +119,57 @@ export class Simulation {
     return out;
   }
 
+  // ----- trust & decision effects -----
+  private refreshFx() {
+    const s = this.state, f = this.fx, trust = trustFactor(s.reputation, this.a);
+    for (const k of PLAYABLE) { f.arrival[k] = trust; f.service[k] = 1; f.capacity[k] = 1; }
+    f.wage = 1; f.overhead = 1; f.payment = [];
+    for (const m of s.modifiers) {
+      const targets = m.service === 'all' ? PLAYABLE : [m.service];
+      if (m.kind === 'arrivalMult') targets.forEach((t) => (f.arrival[t] *= m.value));
+      else if (m.kind === 'serviceTimeMult') targets.forEach((t) => (f.service[t] *= m.value));
+      else if (m.kind === 'capacityMult') targets.forEach((t) => (f.capacity[t] *= m.value));
+      else if (m.kind === 'wageMult') f.wage *= m.value;
+      else if (m.kind === 'overheadMult') f.overhead *= m.value;
+      else f.payment.push(m);
+    }
+  }
+  private payMult(svc: PlayableService, payer: PayerGroup): number {
+    let v = 1; for (const m of this.fx.payment) if ((m.service === 'all' || m.service === svc) && (!m.payer || m.payer === payer)) v *= m.value; return v;
+  }
+  private monthlyTrust() {
+    const s = this.state, target = trustTarget(s.monthBase, s.yearAcc);
+    if (target !== null) s.reputation = nextTrust(s.reputation, target, this.a);
+    s.monthBase = takeMonthBase(s.yearAcc); this.refreshFx();
+  }
+
+  /** Apply the effects of a board decision (or its setback) to the hospital. */
+  private applyOutcome(o: Outcome, tag: string) {
+    const s = this.state;
+    if (o.cashCents) { if (o.cashCents < 0) this.book('cost.decision', -o.cashCents, tag); else this.book('revenue.grant', o.cashCents, tag); }
+    if (o.trust) s.reputation = Math.max(0, Math.min(100, s.reputation + o.trust));
+    (o.modifiers ?? []).forEach((d, i) => s.modifiers.push(modifierFromDef(d, s.year, `${tag}:${i}`)));
+    if (o.subsidyDeltaCents) {
+      const budget = Math.max(0, s.subsidyBudgetCents + o.subsidyDeltaCents), diff = budget - s.subsidyBudgetCents;
+      s.subsidyBudgetCents = budget; s.subsidyRemainingCents = Math.max(0, s.subsidyRemainingCents + diff);
+    }
+    if (o.medicaidAccess) s.policies.medicaidAccess = o.medicaidAccess;
+  }
+  private resolveCard(card: DecisionCard, opt: CardOption, deferred: boolean) {
+    const s = this.state, tag = `${card.id}:${opt.id}`;
+    if (opt.upfrontCents) this.book('cost.decision', opt.upfrontCents, tag);
+    let outcome = typeof opt.outcome === 'function' ? opt.outcome({ last: s.snapshots.at(-1) }) : opt.outcome, failed = false;
+    if (opt.risk && hash01(s.config.seed, s.year, tag) < opt.risk.prob) { outcome = opt.risk.failure; failed = true; }   // seeded: replays and comparisons see the same dice
+    const trustBefore = s.reputation; this.applyOutcome(outcome, tag);
+    s.decisionLog.push({ year: s.year, cardId: card.id, title: card.title, optionId: opt.id, optionLabel: opt.label, deferred, failed, text: outcome.text, cashCents: (outcome.cashCents ?? 0) - opt.upfrontCents, trustDelta: Math.round((s.reputation - trustBefore) * 10) / 10 });
+    s.decisionsThisYear.push(`${s.year}: ${deferred ? 'deferred' : 'decided'} "${card.title}": ${opt.label}${failed ? ' (setback)' : ''}`);
+    s.pendingCard = null; this.refreshFx();
+  }
+  private drawCard(): SimState['pendingCard'] {
+    const s = this.state;
+    return { cardId: pickCard(s.config.seed, s.year, s.decisionLog.map((d) => d.cardId), { last: s.snapshots.at(-1) }).id, year: s.year };
+  }
+
   // ----- capacity -----
   postsReal(d: Department): number {
     const st = this.a.staffing[d.service];
@@ -116,7 +182,7 @@ export class Simulation {
   private servers(d: Department, hour: number): number {
     const [o, c] = this.a.staffing[d.service].openHours;
     if (hour < o || hour >= c) return 0;
-    const real = this.postsReal(d), base = Math.floor(real);
+    const real = Math.min(d.roomSlots, this.postsReal(d) * this.fx.capacity[d.service]), base = Math.floor(real);
     d.capacityCredit += real - base;
     let extra = 0;
     if (d.capacityCredit >= 1 && base < d.roomSlots) { extra = 1; d.capacityCredit -= 1; } else if (d.capacityCredit >= 1) d.capacityCredit = 0;
@@ -131,7 +197,7 @@ export class Simulation {
   }
   applyAction(act: Action): ActionResult {
     const r = this.applyActionInner(act);
-    if (r.ok) this.state.actionLog.push({ tick: this.state.tick, action: act });
+    if (r.ok) { this.state.actionLog.push({ tick: this.state.tick, action: act }); this.refreshFx(); }
     return r;
   }
   private applyActionInner(act: Action): ActionResult {
@@ -166,6 +232,21 @@ export class Simulation {
       case 'grant': { // data-literacy research grant (MODEL_ASSUMPTION), capped so it cannot be abused
         if (!Number.isInteger(act.cents) || act.cents <= 0 || act.cents > 5_000_000) return { ok: false, error: 'Invalid grant.' };
         this.book('revenue.grant', act.cents, `grant:${act.reason}`); return { ok: true };
+      }
+      case 'setPolicy': {
+        if (act.medicaidAccess !== 'full' && act.medicaidAccess !== 'limited') return { ok: false, error: 'Invalid policy.' };
+        if (s.policies.medicaidAccess !== act.medicaidAccess) {
+          s.policies.medicaidAccess = act.medicaidAccess; s.reputation = Math.max(0, s.reputation + (act.medicaidAccess === 'limited' ? -3 : 2));
+          log(act.medicaidAccess === 'limited' ? 'limited elective Medicaid and uninsured access' : 'restored full Medicaid and uninsured access');
+        }
+        return { ok: true };
+      }
+      case 'decide': {
+        const card = getCard(act.cardId), opt = card?.options.find((o) => o.id === act.optionId);
+        if (!card || !opt) return { ok: false, error: 'Unknown decision.' };
+        if (s.pendingCard?.cardId !== act.cardId) return { ok: false, error: 'That decision is not open.' };
+        if (s.cashCents < opt.upfrontCents) return { ok: false, error: `Insufficient funds: need $${(opt.upfrontCents / 100).toLocaleString()}.` };
+        this.resolveCard(card, opt, false); return { ok: true };
       }
       case 'setSubsidy': {
         if (!Number.isInteger(act.budgetCents) || act.budgetCents < 0) return { ok: false, error: 'Invalid budget.' };
@@ -207,7 +288,7 @@ export class Simulation {
       treatTicks = nights * 24; sev = nights <= 2 ? 0 : nights <= 4 ? 1 : nights <= 7 ? 2 : nights <= 14 ? 3 : 4;
     }
     const price = idx(this.a.scenario.medicalPriceInflationPerYear, yrs(s));
-    const pay = Math.round(this.sampleDist(r, dist.facilityPaymentCents) * price);
+    const pay = Math.round(this.sampleDist(r, dist.facilityPaymentCents) * price * this.payMult(svc, cell.payer));
     const oop = Math.min(pay, Math.round(pay * (this.oopShare[`${svc}:${cell.payer}`] ?? 0)));
     const id = `V${s.nextVisitId++}`;
     const patient: SyntheticPatient = { id: `P${id}`, age, payer: cell.payer, incomeBand: cell.incomeBand, riskBand: `severity-${sev + 1}`,
@@ -221,6 +302,7 @@ export class Simulation {
   advance(n: number, opts: { onEvent?: (e: SimEvent) => void; stopAtYearEnd?: boolean } = {}): { ticksRun: number; yearClosed: boolean } {
     const s = this.state, a = this.a, emit = opts.onEvent;
     let ran = 0, closed = false;
+    this.refreshFx();
     while (ran < n && !s.finished && !s.bankrupt) {
       if (this.modelYear !== s.year) this.buildModels();
       const hour = s.tick % 24;
@@ -235,11 +317,17 @@ export class Simulation {
       }
       // 2. arrivals
       for (const svc of PLAYABLE) {
-        const lam = this.models![svc].perDay * this.profiles[svc][hour];
+        const lam = this.models![svc].perDay * this.profiles[svc][hour] * this.fx.arrival[svc];
         const k = poisson(s.rng, lam);
         for (let i = 0; i < k; i++) {
-          const v = this.makeVisit(svc); s.departments[svc].queue.push(v);
+          const v = this.makeVisit(svc);
           s.yearAcc.arrivals[svc]++; const [gp, gi] = groupsOf(s.yearAcc, v); gp.arrivals++; gi.arrivals++; emit?.({ type: 'arrive', tick: s.tick, visit: v });
+          // Elective-access policy: counted as turned away (access, equity and trust all feel it). ER care can never be refused.
+          if (s.policies.medicaidAccess === 'limited' && svc !== 'emergency' && (v.patient.payer === 'medicaid' || v.patient.payer === 'uninsured')
+            && declineDraw(s.nextVisitId - 1) < a.trust.declineShareOfLimitedAccess) {
+            s.yearAcc.unmet[svc]++; gp.unmet++; gi.unmet++; emit?.({ type: 'leave', tick: s.tick, visit: v, reason: 'declined' }); continue;
+          }
+          s.departments[svc].queue.push(v);
         }
       }
       // 3. service starts (FIFO)
@@ -247,7 +335,7 @@ export class Simulation {
       for (const svc of PLAYABLE) {
         const d = s.departments[svc]; let free = this.servers(d, hour) - d.inService.length;
         while (free > 0 && d.queue.length > 0) {
-          const v = d.queue.shift()!; const dur = svc === 'inpatient' ? v.treatmentTicks : Math.max(1, Math.round(v.treatmentTicks * pmult));
+          const v = d.queue.shift()!; const dur = Math.max(1, Math.round(v.treatmentTicks * (svc === 'inpatient' ? 1 : pmult) * this.fx.service[svc]));
           d.inService.push({ visit: v, startTick: s.tick, endTick: s.tick + dur }); free--;
           const wait = s.tick - v.arrivalTick, [gp, gi] = groupsOf(s.yearAcc, v); s.yearAcc.waitSum[svc] += wait; gp.waitTicksSum += wait; gi.waitTicksSum += wait;
           emit?.({ type: 'start', tick: s.tick, visit: v, waitTicks: wait });
@@ -265,9 +353,10 @@ export class Simulation {
       // 5. daily costs at the end of each day (365 charges per year)
       if (hour === 23) this.dailyCosts();
       s.tick++; ran++;
+      if ((s.tick - s.yearStartTick) % 720 === 0) this.monthlyTrust();   // monthly community-trust update
       // 6. year end
       if (s.tick - s.yearStartTick >= a.hoursPerYear) {
-        this.closeYear(); closed = true;
+        this.closeYear(); closed = true; this.refreshFx();
         if (opts.stopAtYearEnd) break;
       }
     }
@@ -281,6 +370,7 @@ export class Simulation {
     this.book(`revenue.${svc}` as LedgerCategory, v.expectedFacilityPaymentCents, v.id);
     const vc = Math.round(this.a.costs.variableCostPerEncounterCents[svc] * idx(this.a.scenario.generalInflationPerYear, yrs(s)));
     this.book('cost.variable', vc, v.id);
+    this.book('cost.overhead', Math.round(v.expectedFacilityPaymentCents * this.a.costs.overheadShareOfRevenue), v.id);   // billing and administration grow with volume
     // financial assistance: forgive eligible patient OOP up to the fund; transparent transfer, recorded as cost.subsidy
     let forgiven = 0;
     const eligible = v.patient.payer === 'uninsured' || v.patient.incomeBand === '<200%FPL';
@@ -303,22 +393,26 @@ export class Simulation {
       staffCost += d.physicians * c.physicianSalaryCents + d.nurses * c.nurseSalaryCents;
       upkeep += d.roomSlots * c.roomUpkeepPerYearCents[svc];
     }
-    this.book('cost.payroll', Math.round((staffCost * idx(sc.wageInflationPerYear, n) * (s.yearEvent?.wageMult ?? 1)) / 365), 'payroll');
+    this.book('cost.payroll', Math.round((staffCost * idx(sc.wageInflationPerYear, n) * (s.yearEvent?.wageMult ?? 1) * this.fx.wage) / 365), 'payroll');
     this.book('cost.upkeep', Math.round((upkeep * idx(sc.generalInflationPerYear, n)) / 365), 'upkeep');
-    this.book('cost.overhead', Math.round((c.overheadPerYearCents * idx(sc.generalInflationPerYear, n)) / 365), 'overhead');
+    this.book('cost.overhead', Math.round((c.overheadPerYearCents * idx(sc.generalInflationPerYear, n) * this.fx.overhead) / 365), 'overhead');
     const pu = c.processImprovementUpkeepCents[s.processLevel];
     if (pu > 0) this.book('cost.process', Math.round((pu * idx(sc.generalInflationPerYear, n)) / 365), 'process-upkeep');
     if (s.cashCents < 0) { if (++s.insolventDays > 60) s.bankrupt = true; } else s.insolventDays = 0;
   }
 
   private closeYear() {
-    const s = this.state, snap = buildSnapshot(s, this.asset, this.population());
+    const s = this.state;
+    if (s.pendingCard) { const card = getCard(s.pendingCard.cardId)!; this.resolveCard(card, card.options.find((o) => o.id === card.defaultOptionId)!, true); }   // no decision = the default, with its consequences
+    const snap = buildSnapshot(s, this.asset, this.population());
     s.snapshots.push(snap);
     if (s.year >= END_YEAR) { s.finished = true; return; }
     // transition
     s.year++; s.yearStartTick = s.tick; s.cashStartOfYearCents = s.cashCents; s.ledger = zeroLedger(); s.yearAcc = freshAcc(); s.decisionsThisYear = [];
     s.subsidyRemainingCents = s.subsidyBudgetCents;
     s.yearEvent = this.rollEvent();
+    s.modifiers = s.modifiers.filter((m) => m.untilYear >= s.year); s.monthBase = takeMonthBase(s.yearAcc);
+    s.pendingCard = this.drawCard();
   }
 
   /** Challenge-mode event for the current year: a pure function of (seed, year), so player decisions never change it. */
@@ -346,11 +440,14 @@ export class Simulation {
   }
 }
 
+/** Deterministic uniform draw from a visit number, so policy outcomes never consume the simulation RNG. */
+const declineDraw = (n: number) => (Math.imul(n ^ 0x9e3779b9, 2654435761) >>> 0) / 4294967296;
 export function serialize(s: SimState): string { return JSON.stringify(s); }
 export function deserialize(json: string): SimState {
   const s = JSON.parse(json) as SimState;
   if (s?.version !== 1 || !s.departments?.emergency || !s.departments.inpatient || !s.rng) throw new Error('Corrupt or incompatible save.');
   s.actionLog ??= []; s.events ??= false; s.yearEvent ??= null;
+  s.reputation ??= 50; s.policies ??= { medicaidAccess: 'full' }; s.modifiers ??= []; s.pendingCard ??= null; s.decisionLog ??= []; s.monthBase ??= takeMonthBase(s.yearAcc);
   return s;
 }
 
