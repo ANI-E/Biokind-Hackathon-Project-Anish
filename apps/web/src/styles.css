@@ -132,3 +132,11 @@ kbd { font: inherit; color: var(--text); border: 1px solid var(--line); border-r
 
 /* keep the primary action reachable on short screens */
 .modal > .row:last-child { position: sticky; bottom: -32px; margin: 18px -32px -32px; padding: 14px 32px; background: var(--panel); border-top: 1px solid var(--line); }
+
+/* board meeting, trust and effects */
+.board .fact { background: var(--card); border-left: 3px solid var(--teal); padding: 10px 12px; margin: 12px 0; font-size: .85rem; }
+.options { display: grid; gap: 12px; margin-top: 14px; } .option { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+.option.default { border-style: dashed; } .option h3 { margin: 0 0 4px; color: var(--text); font-size: 1rem; } .option h3 small { color: var(--mute); font-weight: 400; margin-left: 6px; }
+.option ul { margin: 8px 0; padding-left: 18px; } .option li { margin: 3px 0; } .option li.cost { color: var(--amber); } .option li.risk { color: var(--red); } .option li.free { color: var(--mute); }
+.chips { display: flex; gap: 8px; margin: 10px 0; } .chip { padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); font-size: .8rem; } .chip.pos { color: var(--green); } .chip.neg { color: var(--red); }
+.effects { margin: 4px 0; padding-left: 18px; } .effects li { margin: 3px 0; }

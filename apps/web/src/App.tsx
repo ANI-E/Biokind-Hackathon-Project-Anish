@@ -7,6 +7,7 @@ import { DataInsightsPanel } from './components/DataInsightsPanel';
 import { AssumptionsPanel } from './components/AssumptionsPanel';
 import { YearEndReport } from './components/YearEndReport';
 import { BriefingModal } from './components/BriefingModal';
+import { DecisionModal } from './components/DecisionModal';
 import { WhyMeps } from './components/WhyMeps';
 import { HowToPlay } from './components/HowToPlay';
 import { Onboarding } from './components/Onboarding';
@@ -45,6 +46,7 @@ export default function App() {
       {intro && <Onboarding ctl={ctl} onClose={() => setIntro(false)} />}
       {!intro && ctl.briefing && !ctl.report && <BriefingModal ctl={ctl} />}
       {!intro && ctl.report && <YearEndReport ctl={ctl} />}
+      {!intro && !ctl.briefing && !ctl.report && !ctl.gameOver && (ctl.sim.state.pendingCard || ctl.decisionResult) && <DecisionModal ctl={ctl} />}
     </div>
   );
 }

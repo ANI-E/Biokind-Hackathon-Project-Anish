@@ -11,6 +11,7 @@ export function Onboarding({ ctl, onClose }: { ctl: Controller; onClose: () => v
           <li><b>Hire staff, build rooms and open the inpatient ward, fund efficiency or patient assistance</b> in the Manage tab. Doing nothing slowly bankrupts the hospital; the ward is where the money is. Waiting patients you can't serve in time are lost, and an overloaded ER is a safety problem.</li>
           <li>Open the <b>MEPS Lab</b> to see why these patients arrive and what they pay. Click a patient on the map for their modelled visit.</li>
           <li><b>MEPS is your guide.</b> Each year opens with a short data briefing: predict a real statistic from the survey, see the answer with its confidence interval, and earn a small grant for getting it right. The <b>Data Coach</b> in Manage turns MEPS rates into staffing advice, and the <b>MEPS Lab</b> lets you explore who uses care and what payers pay.</li>
+          <li><b>Every year you face a board decision.</b> Pick well: costs and effects last for years, and your community’s trust decides how many patients choose you.</li>
           <li>Finish each year with a scorecard covering cash, access, affordability and equity, through <b>2044</b>.</li>
         </ul>
         <label className="chk"><input type="checkbox" checked={ctl.challenge} onChange={(e) => ctl.setChallenge(e.target.checked)} /> Challenge mode: random yearly events (flu surge, recession, staffing shortage). Optional; they are scenario assumptions, not predictions.</label>

@@ -32,6 +32,8 @@ export class Controller {
   muted = false; showHelp = false; challenge = false;
   briefing: { year: number; questions: Question[]; picked: (number | null)[] } | null = null;
   literacy: Literacy = { asked: 0, correct: 0, grantsCents: 0 };
+  /** What the player just decided (shown once, then cleared). */
+  decisionResult: { title: string; optionLabel: string; text: string; failed: boolean; trustDelta: number; cashCents: number } | null = null;
   private autoplayAfterBriefing = false;
   paused = true; speed: (typeof SPEEDS)[number] = 1;
   report: AnnualSnapshot | null = null;   // year-end overlay
@@ -58,7 +60,7 @@ export class Controller {
   stop() { cancelAnimationFrame(this.raf); }
   private frame(t: number) {
     const dt = Math.min(0.25, (t - this.last) / 1000); this.last = t;
-    if (this.paused || this.report || this.briefing || this.gameOver) return;   // nothing changes while idle: no clock, no re-render
+    if (this.paused || this.report || this.briefing || this.sim.state.pendingCard || this.decisionResult || this.gameOver) return;   // nothing changes while idle: no clock, no re-render
     this.acc += dt * TICKS_PER_SECOND_AT_1X * this.speed;
     const n = Math.floor(this.acc);
     if (n > 0) { this.acc -= n; this.run(n); }
@@ -93,27 +95,40 @@ export class Controller {
     const st = this.sim.state; if (st.finished || st.bankrupt) return;
     const questions = buildQuestions(this.asset, st.year, 2, st.snapshots.at(-1));
     this.autoplayAfterBriefing = autoplay;
-    if (!questions.length) { if (autoplay) this.setSpeed(1); return; }
+    if (!questions.length) { this.afterBriefing(); return; }
     this.paused = true; this.briefing = { year: st.year, questions, picked: questions.map(() => null) }; this.emit();
   }
+  /** After the briefing comes the board meeting (if a decision is open); play starts only once it is settled. */
+  private afterBriefing() { if (!this.sim.state.pendingCard && this.autoplayAfterBriefing) { this.autoplayAfterBriefing = false; this.setSpeed(1); } else this.emit(); }
   answer(qi: number, choice: number) {
     const b = this.briefing; if (!b || b.picked[qi] !== null) return; b.picked[qi] = choice;
     const q = b.questions[qi], ok = choice === q.answerIndex; this.literacy.asked++;
     if (ok) { this.literacy.correct++; if (this.act({ type: 'grant', cents: 2_500_000, reason: `${b.year}:${q.id}` }).ok) { this.literacy.grantsCents += 2_500_000; sfx.paid(); } } else sfx.leave();
     this.emit();
   }
-  closeBriefing() { this.briefing = null; if (this.autoplayAfterBriefing) { this.autoplayAfterBriefing = false; this.setSpeed(1); } this.emit(); }
+  closeBriefing() { this.briefing = null; this.afterBriefing(); }
+  /** Board meeting: choose an option for the open dilemma. Returns false (with a message) if it cannot be afforded. */
+  decide(optionId: string): boolean {
+    const pc = this.sim.state.pendingCard; if (!pc) return false;
+    if (!this.act({ type: 'decide', cardId: pc.cardId, optionId }).ok) return false;
+    const e = this.sim.state.decisionLog.at(-1)!;
+    this.decisionResult = { title: e.title, optionLabel: e.optionLabel, text: e.text, failed: e.failed, trustDelta: e.trustDelta, cashCents: e.cashCents };
+    this.say(`Board decision: ${e.optionLabel}${e.failed ? ' (setback)' : ''}`); e.failed ? sfx.leave() : sfx.paid(); this.emit(); return true;
+  }
+  closeDecisionResult() { this.decisionResult = null; if (this.autoplayAfterBriefing) { this.autoplayAfterBriefing = false; this.setSpeed(1); } this.emit(); }
   setHelp(on: boolean) { this.showHelp = on; this.emit(); }
   /** Only valid before the first year starts (intro screen). Challenge mode adds seeded yearly events. */
   setChallenge(on: boolean) { this.challenge = on; this.sim = Simulation.create(this.asset, this.sim.state.config.seed, undefined, 'baseline', on); this.emit(); }
-  get card(): Scorecard { return scorecard(this.sim.state.snapshots, this.sim.a, { bankrupt: this.sim.state.bankrupt, finished: this.sim.state.finished, dataIq: this.literacy }); }
+  get card(): Scorecard { return scorecard(this.sim.state.snapshots, this.sim.a, { bankrupt: this.sim.state.bankrupt, finished: this.sim.state.finished, dataIq: this.literacy, reputation: this.sim.state.reputation }); }
   togglePause() { if (!this.report && !this.briefing) this.paused = !this.paused; this.emit(); }
   setSpeed(s: (typeof SPEEDS)[number]) { this.speed = s; this.paused = false; this.emit(); }
   act(a: Action): ActionResult { const r = this.sim.applyAction(a); if (!r.ok) this.say(`Action failed: ${r.error}`); this.emit(); return r; }
   simToYearEnd() {
+    if (this.sim.state.pendingCard) { this.say('Make this year’s board decision first.'); this.emit(); return; }
     this.paused = true; this.events = []; const before = this.sim.state.snapshots.length;
     this.sim.runToYearEnd(); this.afterAdvance(this.sim.state.snapshots.length > before); this.emit();
   }
+  /** Auto-play: every remaining decision is deferred to its default, with the consequences that brings. */
   simTo2044() { this.paused = true; this.events = []; this.sim.runToEnd(); this.afterAdvance(this.sim.state.finished); this.emit(); }
   dismissReport() {
     if (this.sim.state.finished || this.sim.state.bankrupt) return; // end state stays

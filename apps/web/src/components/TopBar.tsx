@@ -1,5 +1,5 @@
 import { SPEEDS, type Controller } from '../controller';
-import { END_YEAR } from '@hospital/sim';
+import { END_YEAR, trustFactor } from '@hospital/sim';
 import { usd, num } from '../format';
 
 export function TopBar({ ctl }: { ctl: Controller }) {
@@ -13,6 +13,7 @@ export function TopBar({ ctl }: { ctl: Controller }) {
       <div className="stat"><span>YEAR</span><b>{s.year}</b><small>day {Math.min(day, 365)} · to {END_YEAR}</small></div>
       <div className={`stat ${s.cashCents < 0 ? 'neg' : ''}`}><span>CASH</span><b>{usd(s.cashCents)}</b></div>
       <div className="stat"><span>TREATED (YTD)</span><b>{num(treated)}</b></div>
+      <div className="stat"><span>TRUST</span><b>{Math.round(s.reputation)}</b><small>demand ×{trustFactor(s.reputation, ctl.sim.a).toFixed(2)}</small></div>
       <div className="stat"><span>WAITING</span><b>{waiting}</b></div>
       {ctl.literacy.asked > 0 && <div className="stat"><span>MEPS IQ</span><b>{ctl.literacy.correct}/{ctl.literacy.asked}</b><small>briefing answers</small></div>}
       <div className={`stat mode ${ctl.isDemo ? 'demo' : 'real'}`}><span>DATA</span><b>{ctl.isDemo ? 'DEMO SYNTHETIC' : 'MEPS 2024'}</b></div>
@@ -22,7 +23,7 @@ export function TopBar({ ctl }: { ctl: Controller }) {
         <button onClick={() => ctl.setHelp(true)} title="How to play" aria-label="How to play">? Help</button>
         <button onClick={() => ctl.toggleMute()} aria-pressed={ctl.muted} aria-label={ctl.muted ? 'Unmute sound' : 'Mute sound'} title="Toggle sound (M)">{ctl.muted ? 'Sound off' : 'Sound on'}</button>
         <button onClick={() => ctl.simToYearEnd()} disabled={ctl.gameOver}>Sim to year-end</button>
-        <button onClick={() => ctl.simTo2044()} disabled={ctl.gameOver}>Sim to {END_YEAR}</button>
+        <button onClick={() => ctl.simTo2044()} disabled={ctl.gameOver} title="Skips every board decision: each is deferred to its default">Auto-play to {END_YEAR}</button>
       </div>
     </header>
   );

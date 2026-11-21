@@ -4,6 +4,7 @@ import { usd, hrs } from '../format';
 import { Badge } from './Badge';
 import { CoachCard } from './CoachCard';
 import { MissionCard } from './ScoreCard';
+import { PoliciesCard } from './PoliciesCard';
 
 export function ManagePanel({ ctl }: { ctl: Controller }) {
   const sim = ctl.sim, s = sim.state, a = sim.a, n = s.year - 2024;
@@ -15,6 +16,7 @@ export function ManagePanel({ ctl }: { ctl: Controller }) {
   return (
     <div className="panel-body">
       <MissionCard ctl={ctl} />
+      <PoliciesCard ctl={ctl} />
       <CoachCard ctl={ctl} />
       <section className="card">
         <h3>Year to date</h3>

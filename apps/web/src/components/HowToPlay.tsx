@@ -15,6 +15,7 @@ export function HowToPlay({ ctl }: { ctl: Controller }) {
         <h3>What a year looks like</h3>
         <ol>
           <li><b>MEPS briefing.</b> Predict a real statistic from the survey, see the answer and its confidence interval, earn a small grant if right.</li>
+          <li><b>Board meeting.</b> One dilemma a year (a Medicaid rate cut, a nurse contract, new equipment, a free clinic…). Every option has a price, lasting effects and sometimes a risk. <b>Not deciding is a decision too</b>: the default happens.</li>
           <li><b>Run the year.</b> Patients arrive, queue, get treated and pay. Pause, or use 1x / 3x / 10x. Change staffing and buildings any time.</li>
           <li><b>Year-end report.</b> Cash, access, affordability, equity, and how your patients compare with the MEPS population.</li>
           <li><b>Repeat</b> through {END_YEAR}. Prices, wages, population and ageing drift each year (scenario assumptions).</li>
@@ -33,6 +34,15 @@ export function HowToPlay({ ctl }: { ctl: Controller }) {
           <li>The <b>Data Coach</b> turns MEPS numbers into advice. Follow its warnings first.</li>
         </ul>
 
+        <h3>Your choices have consequences</h3>
+        <ul>
+          <li><b>Money is not automatic.</b> Doing nothing goes bankrupt. Even a good ward has to be paid for, and revenue only comes from patients you actually serve.</li>
+          <li><b>Community trust</b> (0–100) moves every month with how well you serve people: patients treated, ER and ward transfers avoided, short and fair waits. Trust scales how many patients choose you, so good care grows your demand and neglect shrinks it.</li>
+          <li><b>Policies</b> are real tradeoffs. Limiting elective Medicaid and uninsured patients protects revenue per visit, but turns people away, so access, equity and trust all fall. The ER can never refuse anyone.</li>
+          <li><b>Decisions last.</b> Effects stay active for years (see Active effects in Manage), and risky options are rolled with the same dice on every replay, so you can compare choices fairly.</li>
+          <li><b>Auto-play</b> skips every board decision, so each defaults. It shows what indecision costs.</li>
+        </ul>
+
         <h3>How you are graded</h3>
         <table className="tbl"><thead><tr><th>Objective</th><th>Weight</th><th>Goal</th></tr></thead><tbody>
           <tr><td>Financial viability</td><td>{pc(w.finance)}</td><td>Stay solvent; finish with more cash than you started</td></tr>
@@ -40,6 +50,7 @@ export function HowToPlay({ ctl }: { ctl: Controller }) {
           <tr><td>Emergency safety</td><td>{pc(w.safety)}</td><td>Do not transfer ER or ward patients away</td></tr>
           <tr><td>Equity</td><td>{pc(w.equity)}</td><td>Similar waits for every insurance group</td></tr>
           <tr><td>Affordability</td><td>{pc(w.affordability)}</td><td>Relieve out-of-pocket costs for low-income patients</td></tr>
+          <tr><td>Community trust</td><td>{pc(w.trust)}</td><td>Serve everyone well so people keep choosing you</td></tr>
           <tr><td>Data IQ</td><td>{pc(w.dataIq)}</td><td>Answer MEPS briefing questions correctly</td></tr>
         </tbody></table>
         <p className="note">Weights are game design <Badge kind="MODEL_ASSUMPTION" />. Going bankrupt (cash below zero for 60 days) ends the game with zero financial score.</p>

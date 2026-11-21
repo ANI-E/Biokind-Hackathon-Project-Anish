@@ -29,6 +29,12 @@ export function YearEndReport({ ctl }: { ctl: Controller }) {
         {r.mode === 'DEMO_SYNTHETIC' && <div className="banner demo">DEMO MODE: SYNTHETIC PLACEHOLDER DATA</div>}
         {r.event && <div className="banner warn">Event this year: <b>{r.event}</b></div>}
         <ScoreCard ctl={ctl} final={last} />
+        {(() => { const ds = s.decisionLog.filter((d) => d.year === r.year); return (
+          <section className="card">
+            <h3>Decisions and consequences <small>community trust {r.reputation.toFixed(0)}/100</small></h3>
+            {ds.length === 0 ? <p className="note">No board decision was recorded this year.</p> : (
+              <ul className="effects">{ds.map((d) => <li key={d.cardId}><b>{d.title}</b>: {d.optionLabel}{d.deferred ? ' (deferred: you did not decide)' : ''}{d.failed ? ' (setback)' : ''}. {d.text}{d.trustDelta ? ` Trust ${d.trustDelta > 0 ? '+' : ''}${d.trustDelta}.` : ''}</li>)}</ul>)}
+          </section>); })()}
         <div className="grid4">
           <div className="tile"><span>Net result</span><b className={r.netCents < 0 ? 'neg' : 'pos'}>{usd(r.netCents)}</b><small>rev {usd(r.revenueCents, true)} − cost {usd(r.expensesCents, true)}</small></div>
           <div className="tile"><span>Cash</span><b className={r.cashCents < 0 ? 'neg' : ''}>{usd(r.cashCents)}</b><small>start {usd(r.cashStartCents, true)}</small></div>

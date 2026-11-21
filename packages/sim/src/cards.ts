@@ -37,7 +37,8 @@ export const CARDS: DecisionCard[] = [
     id: 'medicaid-cut', title: 'State budget: Medicaid rate cut', minYear: 2025, defaultOptionId: 'absorb',
     story: 'The state proposes cutting what it pays hospitals for Medicaid patients by 12% for the next four years.',
     fact: (a) => { const m = a.insights?.ratesAndSpendingByGroup.payer.medicaid, e = a.payments.emergency.byPayer;
-      return m ? `MEPS: Medicaid is ${pct(m.weightedShare)} of people but a larger share of ER events (${(m.emergency.est * 100).toFixed(1)} visits per 100 people). An ER visit pays ${usd(e.medicaid.facilityPaymentCents.mean)} on average for Medicaid versus ${usd(e.private.facilityPaymentCents.mean)} for private insurance.` : null; },
+      const pv = a.insights?.ratesAndSpendingByGroup.payer.private;
+      return m && pv ? `MEPS: Medicaid is ${pct(m.weightedShare)} of people and they use the ER more (${(m.emergency.est * 100).toFixed(1)} visits per 100 people versus ${(pv.emergency.est * 100).toFixed(1)} for private insurance), yet an ER visit pays ${usd(e.medicaid.facilityPaymentCents.mean)} for Medicaid versus ${usd(e.private.facilityPaymentCents.mean)} for private.` : null; },
     options: [
       { id: 'absorb', label: 'Absorb the cut', detail: 'Keep treating everyone; Medicaid visits pay less.', upfrontCents: 0,
         outcome: { text: 'Medicaid payments fall 12% for four years.', modifiers: [{ kind: 'paymentMult', payer: 'medicaid', value: 0.88, years: 4, label: 'State Medicaid rate cut' }] } },
