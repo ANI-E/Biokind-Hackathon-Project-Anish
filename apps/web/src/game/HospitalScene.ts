@@ -67,9 +67,9 @@ export class HospitalScene extends Phaser.Scene {
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.keys = this.input.keyboard!.addKeys('W,A,S,D,E,SPACE,M') as Record<string, Phaser.Input.Keyboard.Key>;
     // tap-style keys are event driven so very short key presses are never missed between frames
-    this.input.keyboard!.on('keydown-E', () => { this.interactQueued = true; });
+    this.input.keyboard!.on('keydown-E', () => { if (!this.ctl.inputBlocked) this.interactQueued = true; });
     this.input.keyboard!.on('keydown-SPACE', () => this.ctl.togglePause());
-    this.input.keyboard!.on('keydown-M', () => this.ctl.toggleMute());
+    this.input.keyboard!.on('keydown-M', () => { if (!this.ctl.introOpen) this.ctl.toggleMute(); });
     this.events.once('shutdown', () => { this.people.clear(); this.staff = []; });
   }
 
@@ -103,7 +103,7 @@ export class HospitalScene extends Phaser.Scene {
       if (near) { this.prompt.setScale(0.6).setAlpha(0); this.tweens.add({ targets: this.prompt, scale: 1, alpha: 1, duration: 110, ease: 'Back.Out' }); }
     }
     this.drawFocus(near);
-    if (near) {
+    if (near && !this.ctl.inputBlocked) {
       const s = proj(near.x + 0.5, near.y + 0.5); this.prompt.setText(`[E] ${near.label}`).setOrigin(0.5, 1).setPosition(Math.round(s.x), Math.round(s.y - 64)).setVisible(true);
       if (this.interactQueued) { sfx.ui(); this.ctl.openTab(near.tab); this.pulse(s.x, s.y); }
     } else this.prompt.setVisible(false);
@@ -149,8 +149,9 @@ export class HospitalScene extends Phaser.Scene {
   }
 
   private movePlayer(dt: number) {
-    const L = this.cursors.left.isDown || this.keys.A.isDown, R = this.cursors.right.isDown || this.keys.D.isDown;
-    const U = this.cursors.up.isDown || this.keys.W.isDown, D = this.cursors.down.isDown || this.keys.S.isDown;
+    const free = !this.ctl.inputBlocked;
+    const L = free && (this.cursors.left.isDown || this.keys.A.isDown), R = free && (this.cursors.right.isDown || this.keys.D.isDown);
+    const U = free && (this.cursors.up.isDown || this.keys.W.isDown), D = free && (this.cursors.down.isDown || this.keys.S.isDown);
     let vx = (R ? 1 : 0) - (L ? 1 : 0), vy = (D ? 1 : 0) - (U ? 1 : 0); const moving = vx !== 0 || vy !== 0;
     if (moving) {
       const n = Math.hypot(vx, vy); vx = (vx / n) * 170 * dt; vy = (vy / n) * 170 * dt;       // screen pixels this frame

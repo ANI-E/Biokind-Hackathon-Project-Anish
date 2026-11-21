@@ -28,7 +28,7 @@ const TICKS_PER_SECOND_AT_1X = 2; // 1 tick = 1 simulated hour
 
 export class Controller {
   sim: Simulation; asset: ModelAsset; assetError?: string;
-  muted = false; showHelp = false; challenge = false;
+  muted = false; showHelp = false; challenge = false; introOpen = true;
   briefing: { year: number; questions: Question[]; picked: (number | null)[] } | null = null;
   literacy = { asked: 0, correct: 0, grantsCents: 0 };
   private autoplayAfterBriefing = false;
@@ -106,7 +106,7 @@ export class Controller {
   /** Only valid before the first year starts (intro screen). Challenge mode adds seeded yearly events. */
   setChallenge(on: boolean) { this.challenge = on; this.sim = Simulation.create(this.asset, this.sim.state.config.seed, undefined, 'baseline', on); this.emit(); }
   get card(): Scorecard { return scorecard(this.sim.state.snapshots, this.sim.a, { bankrupt: this.sim.state.bankrupt, finished: this.sim.state.finished, dataIq: this.literacy }); }
-  togglePause() { if (!this.report && !this.briefing) this.paused = !this.paused; this.emit(); }
+  togglePause() { if (!this.inputBlocked) this.paused = !this.paused; this.emit(); }
   setSpeed(s: (typeof SPEEDS)[number]) { this.speed = s; this.paused = false; this.emit(); }
   act(a: Action): ActionResult { const r = this.sim.applyAction(a); if (!r.ok) this.say(`Action failed: ${r.error}`); this.emit(); return r; }
   simToYearEnd() {
@@ -118,10 +118,13 @@ export class Controller {
     if (this.sim.state.finished || this.sim.state.bankrupt) return; // end state stays
     this.report = null; this.openBriefing(); this.emit();
   }
+  /** true while any overlay is up: the map ignores keys so nothing happens behind a dialog */
+  get inputBlocked() { return this.introOpen || this.showHelp || !!this.briefing || !!this.report; }
+  closeIntro() { this.introOpen = false; this.emit(); }
   get gameOver() { return this.sim.state.finished || this.sim.state.bankrupt; }
   select(v: Visit | null) { this.selected = v; this.emit(); }
   openTab(tab: string) { this.focusTab = tab; this.tabNonce++; this.emit(); }
-  restart(seed?: number) { this.literacy = { asked: 0, correct: 0, grantsCents: 0 }; this.briefing = null; this.sim = Simulation.create(this.asset, seed ?? this.sim.state.config.seed, undefined, 'baseline', this.challenge); this.report = null; this.paused = true; this.events = []; this.messages = []; this.say('New game.'); this.emit(); }
+  restart(seed?: number) { this.literacy = { asked: 0, correct: 0, grantsCents: 0 }; this.briefing = null; this.sim = Simulation.create(this.asset, seed ?? this.sim.state.config.seed, undefined, 'baseline', this.challenge); this.report = null; this.paused = true; this.events = []; this.messages = []; this.say('New game. Press Play.'); this.emit(); }
 
   save() { try { localStorage.setItem(SAVE_KEY, serialize(this.sim.state)); } catch { /* storage unavailable */ } }
   hasSave(): boolean { try { return !!localStorage.getItem(SAVE_KEY); } catch { return false; } }

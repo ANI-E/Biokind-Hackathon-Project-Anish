@@ -10,6 +10,7 @@ import { BriefingModal } from './components/BriefingModal';
 import { WhyMeps } from './components/WhyMeps';
 import { HowToPlay } from './components/HowToPlay';
 import { Onboarding } from './components/Onboarding';
+import { Goals } from './components/Goals';
 
 const TABS = [['manage', 'Manage'], ['data', 'MEPS Lab'], ['why', 'Why MEPS'], ['about', 'About']] as const;
 
@@ -18,7 +19,7 @@ export default function App() {
   useSyncExternalStore(ctl.subscribe, ctl.getVersion);
   if (import.meta.env.DEV) (window as unknown as { __ctl: Controller }).__ctl = ctl;
   const [tab, setTab] = useState<string>('manage');
-  const [intro, setIntro] = useState(true);
+  const intro = ctl.introOpen;
   useEffect(() => { ctl.start(); return () => ctl.stop(); }, [ctl]);
   useEffect(() => { if (ctl.focusTab) setTab(ctl.focusTab); }, [ctl.tabNonce, ctl.focusTab]);
   const warn = ctl.sim.state.yearAcc.unmet.emergency;
@@ -26,6 +27,7 @@ export default function App() {
     <div className="app">
       {ctl.isDemo && <div className="banner demo top">DEMO MODE: SYNTHETIC PLACEHOLDER DATA. MEPS CALIBRATION NOT YET LOADED.</div>}
       <TopBar ctl={ctl} />
+      <Goals ctl={ctl} />
       <main className="main">
         <div className="stage"><Game ctl={ctl} /></div>
         <aside className="side">
@@ -36,9 +38,9 @@ export default function App() {
           {tab === 'about' && <AssumptionsPanel ctl={ctl} />}
         </aside>
       </main>
-      <footer className="ticker" aria-live="polite">{warn > 0 && <b className="warn-chip">⚠ ER overloaded: {warn} transferred/left unseen this year</b>}{ctl.messages.slice(0, 3).map((m, i) => <span key={i}>{m}</span>)}</footer>
+      <footer className="ticker" aria-live="polite">{warn > 0 && <b className="warn-chip">⚠ {warn} ER patients turned away</b>}<span>{ctl.messages[0]}</span></footer>
       {ctl.showHelp && <HowToPlay ctl={ctl} />}
-      {intro && <Onboarding ctl={ctl} onClose={() => setIntro(false)} />}
+      {intro && <Onboarding ctl={ctl} onClose={() => ctl.closeIntro()} />}
       {!intro && ctl.briefing && !ctl.report && <BriefingModal ctl={ctl} />}
       {!intro && ctl.report && <YearEndReport ctl={ctl} />}
     </div>

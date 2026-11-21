@@ -8,7 +8,7 @@ export function Objectives({ ctl }: { ctl: Controller }) {
     <div className="obj" key={o.id}>
       <div className="row"><span>{o.label} <small>({Math.round(w[o.id] * 100)}%)</small></span><b style={{ color: COLOR(o.score) }}>{Math.round(o.score)}</b></div>
       <div className="meter"><i style={{ width: `${o.score}%`, background: COLOR(o.score) }} /></div>
-      <small>{o.detail}. Goal: {o.target}.</small>
+      <small>{o.detail} · goal: {o.target}</small>
     </div>))}</>);
 }
 
@@ -17,11 +17,11 @@ export function MissionCard({ ctl }: { ctl: Controller }) {
   const c = ctl.card, ev = ctl.sim.state.yearEvent;
   return (
     <section className="card mission">
-      <h3>Your mission <small>keep the doors open, treat everyone fairly, reach 2044</small></h3>
+      <h3>Grade</h3>
       {ev && <div className="banner warn">Event this year: <b>{ev.label}</b>. {ev.description}</div>}
-      {c.years === 0 ? <p className="note">Your grade appears after the first year closes. You are scored on six objectives, not just cash. Press <b>? Help</b> for the full guide.</p> : (<>
+      {c.years === 0 ? <p className="note">Your grade appears after year 1.</p> : (<>
         <div className="grade"><b style={{ color: COLOR(c.total) }}>{c.grade}</b><span>running grade · {Math.round(c.total)}/100 after {c.years} year{c.years === 1 ? '' : 's'}</span></div>
-        <details><summary>See the six objectives</summary><Objectives ctl={ctl} /></details></>)}
+        <details><summary>Six objectives</summary><Objectives ctl={ctl} /></details></>)}
     </section>
   );
 }
@@ -34,7 +34,6 @@ export function ScoreCard({ ctl, final }: { ctl: Controller; final: boolean }) {
       <h3>{final ? 'Final administrator grade' : 'Running grade'}</h3>
       <div className="grade big"><b style={{ color: COLOR(c.total) }}>{c.grade}</b><span>{Math.round(c.total)}/100 · {c.survived ? `${c.years} years` : 'went bankrupt'}</span></div>
       <Objectives ctl={ctl} />
-      <p className="note">Weights and thresholds are game-design assumptions. Grade = weighted average of the six objectives.</p>
     </section>
   );
 }

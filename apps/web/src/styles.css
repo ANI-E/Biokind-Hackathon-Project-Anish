@@ -51,3 +51,10 @@ button:focus-visible { outline: 2px solid var(--amber); outline-offset: 1px; }
 .mission { border-color: var(--amber); } .mission h3 { color: var(--amber); } .mission h3 small { font-weight: 400; margin-left: 4px; }
 .how h3 { margin-top: 16px; } .how ol, .how ul { padding-left: 20px; } .how li { margin: 4px 0; }
 .chk { display: flex; gap: 8px; align-items: flex-start; font-size: 12px; color: var(--mute); margin: 10px 0; cursor: pointer; } .chk input { margin-top: 3px; }
+.goals { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; padding: 6px 14px; background: #0e1730; border-bottom: 1px solid var(--line); font-size: 13px; }
+.goals-h { color: var(--amber); } .goals-h small { font-weight: 400; }
+.goal { padding: 2px 8px; border-radius: 12px; border: 1px solid var(--line); white-space: nowrap; transition: background .2s, border-color .2s; }
+.goal.ok { background: #052e16; border-color: #166534; color: #bbf7d0; } .goal.mid { color: var(--text); } .goal.bad { background: #450a0a; border-color: #991b1b; color: #fecaca; }
+.next { margin-left: auto; display: flex; align-items: center; gap: 6px; } button.sm { padding: 2px 8px; font-size: 12px; }
+.steps { padding-left: 20px; } .steps li { margin: 6px 0; }
+@media (max-width: 900px) { .next { margin-left: 0; } }
