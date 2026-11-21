@@ -1,7 +1,7 @@
 /** MEPS-driven teaching layer: yearly briefing questions (answers always computed from the loaded asset) and a live Data Coach. */
 import type { Est, ModelAsset } from './assets';
 import type { Simulation } from './simulation';
-import type { AnnualSnapshot, PlayableService, ProvenanceKind } from './types';
+import type { Action, AnnualSnapshot, PlayableService, ProvenanceKind } from './types';
 
 export interface Question {
   id: string; prompt: string; options: string[]; answerIndex: number;
@@ -85,7 +85,7 @@ export function buildQuestions(asset: ModelAsset, year: number, count = 2, last?
 }
 
 // ---------------- Data Coach ----------------
-export interface Tip { id: string; severity: 'warn' | 'info' | 'good'; title: string; meps: string; advice: string; tab?: string }
+export interface Tip { id: string; severity: 'warn' | 'info' | 'good'; title: string; meps: string; advice: string; tab?: string; apply?: { label: string; actions: Action[] } }
 const meanHours = (sim: Simulation, svc: PlayableService) => { const t = sim.a.treatment, h = svc === 'emergency' ? t.emergencyHoursBySeverity : t.outpatientHoursBySeverity; return h.reduce((s, x, i) => s + x * t.severityWeights[i], 0); };
 /** servers needed so queues stay short: offered load + 2 sqrt(load) (square-root staffing rule of thumb) */
 const needServers = (load: number) => Math.ceil(load + 2 * Math.sqrt(load));
@@ -97,17 +97,20 @@ export function coachTips(sim: Simulation): Tip[] {
   const erPerDay = exp.emergency / 365, erLoad = (erPerDay * meanHours(sim, 'emergency')) / 24, erNeed = needServers(erLoad), erCap = sim.postsReal(dep.emergency);
   if (erCap < erNeed) tips.push({ id: 'er-cap', severity: 'warn', title: `ER capacity ${erCap.toFixed(1)} vs ~${erNeed} needed`, tab: 'manage',
     meps: `MEPS: ${erRate ? per100(erRate.est) : '?'} ER visits per 100 people per year × ${sim.population().toLocaleString()} residents × ${(sim.a.hospitalShare.emergency * 100).toFixed(0)}% share ≈ ${Math.round(exp.emergency).toLocaleString()} arrivals (${erPerDay.toFixed(1)}/day).`,
-    advice: `Average treatment ${meanHours(sim, 'emergency').toFixed(1)} h keeps ~${erLoad.toFixed(1)} posts busy on average; peaks need about ${erNeed}. Each ER post costs ~4.5 physicians + 9 nurses of payroll, and diversions carry penalties, so weigh both.` });
+    advice: `Average treatment ${meanHours(sim, 'emergency').toFixed(1)} h keeps ~${erLoad.toFixed(1)} posts busy on average; peaks need about ${erNeed}. Each ER post costs ~4.5 physicians + 9 nurses of payroll, and diversions carry penalties, so weigh both.`,
+    apply: { label: 'Add ER cover (+2 physicians, +4 nurses)', actions: [{ type: 'hire', service: 'emergency', role: 'physician', count: 2 }, { type: 'hire', service: 'emergency', role: 'nurse', count: 4 }] } });
   const ipPerYr = exp.inpatient, nights = a.payments.inpatient.pooled.nights?.mean ?? 5, occ = (ipPerYr * nights) / 365, bedsNeed = needServers(occ);
   const ipMean = Object.entries(a.payments.inpatient.byPayer).reduce((t, [p, d]) => t + (sim.payerMix('inpatient')[p] ?? 0) * d.facilityPaymentCents.mean, 0);
   if (dep.inpatient.roomSlots === 0) tips.push({ id: 'ward-closed', severity: 'warn', title: 'Your inpatient ward is closed', tab: 'manage',
     meps: `MEPS: ${ipRate ? per100(ipRate.est) : '?'} inpatient stays per 100 people per year (expect ~${Math.round(ipPerYr)} at your hospital); mean facility payment ${usd(ipMean)} per stay versus ${usd(a.payments.emergency.pooled.facilityPaymentCents.mean)} per ER visit.`,
-    advice: `Stays average ${nights.toFixed(1)} nights, so ~${occ.toFixed(1)} beds are occupied on average; plan ~${bedsNeed} beds and one 6-bed staffing post per 6 beds. Stays are the biggest payment pool in the data (~${usd(ipMean * ipPerYr)}/yr), and every refused admission now costs a penalty.` });
+    advice: `Stays average ${nights.toFixed(1)} nights, so ~${occ.toFixed(1)} beds are occupied on average; plan ~${bedsNeed} beds and one 6-bed staffing post per 6 beds. Stays are the biggest payment pool in the data (~${usd(ipMean * ipPerYr)}/yr), and every refused admission now costs a penalty.`,
+    apply: { label: 'Open a staffed 6-bed ward', actions: [...Array.from({ length: 6 }, () => ({ type: 'addRoom', service: 'inpatient' }) as Action), { type: 'hire', service: 'inpatient', role: 'physician', count: 5 }, { type: 'hire', service: 'inpatient', role: 'nurse', count: 9 }] } });
   else if (sim.postsReal(dep.inpatient) < bedsNeed) tips.push({ id: 'ward-cap', severity: 'warn', title: `Ward capacity ${sim.postsReal(dep.inpatient).toFixed(1)} beds vs ~${bedsNeed} needed`, tab: 'manage',
     meps: `MEPS: ${nights.toFixed(1)} nights per stay × ~${Math.round(ipPerYr)} admissions ⇒ ~${occ.toFixed(1)} beds occupied on average.`, advice: 'Staffed beds are the minimum of built beds, physician cover and nurse cover. Check which one limits you.' });
   const opLoad = ((exp.outpatient / 365) * meanHours(sim, 'outpatient')) / 10, opCap = sim.postsReal(dep.outpatient), opNeed = needServers(opLoad);
   if (opCap > opNeed + 1) tips.push({ id: 'op-over', severity: 'info', title: `Clinic staffed for ${opCap.toFixed(1)}, load needs ~${opNeed}`, tab: 'manage',
-    meps: `MEPS: ${db ? (db.ratesPerPersonYear.outpatient.est).toFixed(2) : '?'} outpatient visits per person-year ⇒ ~${Math.round(exp.outpatient)} visits at your clinic (${(exp.outpatient / 365).toFixed(1)}/day in 10 open hours).`, advice: 'You pay for idle capacity. Trimming one physician and one nurse is the cheapest saving in the game.' });
+    meps: `MEPS: ${db ? (db.ratesPerPersonYear.outpatient.est).toFixed(2) : '?'} outpatient visits per person-year ⇒ ~${Math.round(exp.outpatient)} visits at your clinic (${(exp.outpatient / 365).toFixed(1)}/day in 10 open hours).`, advice: 'You pay for idle capacity. Trimming one physician and one nurse is the cheapest saving in the game.',
+    apply: { label: 'Trim 1 physician + 1 nurse', actions: [{ type: 'fire', service: 'outpatient', role: 'physician', count: 1 }, { type: 'fire', service: 'outpatient', role: 'nurse', count: 1 }] } });
   const unins = mixE.uninsured ?? 0, mcd = mixE.medicaid ?? 0, e = a.payments.emergency.byPayer;
   tips.push({ id: 'payer-mix', severity: 'info', title: `${pctf(unins + mcd)} of ER arrivals are uninsured or Medicaid`,
     meps: `MEPS facility payment per ER visit: private ${usd(e.private.facilityPaymentCents.mean)}, Medicare ${usd(e.medicare.facilityPaymentCents.mean)}, Medicaid ${usd(e.medicaid.facilityPaymentCents.mean)}, uninsured ${usd(e.uninsured.facilityPaymentCents.mean)}${e.uninsured.source?.includes('low') ? ' (small sample)' : ''}.`,

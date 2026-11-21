@@ -18,7 +18,7 @@ Run a community hospital from 2024 to 2044 and **keep it open and fair**: stay s
 ```
 npm install
 npm run dev        # http://localhost:5173
-npm test           # 28 sim/data/teaching tests (vitest)
+npm test           # 30 sim/data/teaching tests (vitest)
 npm run build      # typecheck + production build
 ```
 Controls: WASD/arrows move, E interacts (desk, consoles, reception board, kiosk), Space pauses, M mutes, wheel zooms.
@@ -30,6 +30,9 @@ python3 -m venv .venv && .venv/bin/pip install pandas pyreadstat numpy
 npm run data                                # build_baseline.py + validate_baseline.py -> docs/DATA_REPORT.md
 ```
 If the download is blocked, fetch the Stata zips manually and pass `--dataset HC-256 --local-zip PATH`.
+
+## Presentation
+`docs/presentation/Hospital-Tycoon-2044-Slides.pdf` is the 8-slide deck for the 4-minute talk (with a live-demo slide).
 
 ## Layout
 `packages/sim` deterministic simulation + teaching engine · `packages/model-assets` derived MEPS JSON and `default-assumptions.json` · `apps/web` Vite + React + Phaser (isometric) · `scripts/` Python ETL · `docs/` methods, assumptions, data report.

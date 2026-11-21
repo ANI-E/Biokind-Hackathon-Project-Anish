@@ -214,3 +214,15 @@ describe('challenge events & scorecard', () => {
     expect(sc(good)).toBeGreaterThan(sc(nothing));
   });
 });
+
+describe('coach one-click suggestions', () => {
+  it('the closed-ward and clinic-trim suggestions apply cleanly and then disappear from the advice', () => {
+    const s = Simulation.create(asset, 1);
+    const tips = coachTips(s); const ward = tips.find((t) => t.id === 'ward-closed')!, trim = coachTips(s).find((t) => t.id === 'op-over');
+    expect(ward.apply!.actions.every((a) => s.applyAction(a).ok)).toBe(true);
+    if (trim) expect(trim.apply!.actions.every((a) => s.applyAction(a).ok)).toBe(true);
+    expect(s.state.departments.inpatient.roomSlots).toBe(6);
+    expect(coachTips(s).some((t) => t.id === 'ward-closed')).toBe(false);
+    expect(s.checkInvariants()).toEqual([]);
+  });
+});
