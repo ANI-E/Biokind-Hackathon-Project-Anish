@@ -9,6 +9,7 @@ export function TopBar({ ctl }: { ctl: Controller }) {
   const day = Math.floor((s.tick - s.yearStartTick) / 24) + 1;
   return (
     <header className="topbar">
+      <div className="brand"><h1><span className="brand-mark" aria-hidden="true">+</span>Hospital Tycoon</h1><small>2024 — 2044 · A MEPS simulation</small></div>
       <div className="stat"><span>YEAR</span><b>{s.year}</b><small>day {Math.min(day, 365)} · to {END_YEAR}</small></div>
       <div className={`stat ${s.cashCents < 0 ? 'neg' : ''}`}><span>CASH</span><b>{usd(s.cashCents)}</b></div>
       <div className="stat"><span>TREATED (YTD)</span><b>{num(treated)}</b></div>
@@ -19,7 +20,7 @@ export function TopBar({ ctl }: { ctl: Controller }) {
         <button onClick={() => ctl.togglePause()} aria-pressed={ctl.paused}>{ctl.paused ? '▶ Play' : '❚❚ Pause'}</button>
         {SPEEDS.map((sp) => <button key={sp} className={!ctl.paused && ctl.speed === sp ? 'on' : ''} onClick={() => ctl.setSpeed(sp)}>{sp}x</button>)}
         <button onClick={() => ctl.setHelp(true)} title="How to play" aria-label="How to play">? Help</button>
-        <button onClick={() => ctl.toggleMute()} aria-pressed={ctl.muted} title="Toggle sound (M)">{ctl.muted ? '🔇' : '🔊'}</button>
+        <button onClick={() => ctl.toggleMute()} aria-pressed={ctl.muted} aria-label={ctl.muted ? 'Unmute sound' : 'Mute sound'} title="Toggle sound (M)">{ctl.muted ? 'Sound off' : 'Sound on'}</button>
         <button onClick={() => ctl.simToYearEnd()} disabled={ctl.gameOver}>Sim to year-end</button>
         <button onClick={() => ctl.simTo2044()} disabled={ctl.gameOver}>Sim to {END_YEAR}</button>
       </div>

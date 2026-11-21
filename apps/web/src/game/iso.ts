@@ -133,7 +133,7 @@ export const boxOrigin = (h: number) => (16 + h) / (32 + h);
 export function makeTextures(scene: Phaser.Scene) {
   const g = scene.make.graphics({ x: 0, y: 0 }, false);
   const floor = (k: string, a: number, b: number) => { [a, b].forEach((c, i) => { g.clear(); diamond(g, 32, 16, 1, c); g.lineStyle(1, 0x000000, 0.06).strokePoints([{ x: 32, y: 0 }, { x: 64, y: 16 }, { x: 32, y: 32 }, { x: 0, y: 16 }], true); g.generateTexture(`f_${k}_${i}`, 64, 32); }); };
-  floor('grass', 0x58a85a, 0x4f9f52); floor('path', 0xd2c3a3, 0xc9b99a); floor('hall', 0xcfe3ea, 0xc3d9e2); floor('er', 0xd7f0e5, 0xcdeadc);
+  floor('grass', 0x789382, 0x748e7d); floor('path', 0xc7c0ad, 0xc0b9a6); floor('hall', 0xcfe3ea, 0xc3d9e2); floor('er', 0xd7f0e5, 0xcdeadc);
   floor('op', 0xdbe8f9, 0xd1e0f4); floor('ip', 0xe6dcf5, 0xdccff0); floor('admin', 0xe9dcc3, 0xe2d4b8); floor('corr', 0xe8eef5, 0xdfe7f1); floor('door', 0xb08968, 0xa57c5c);
   (['hi', 'mid', 'lo'] as const).forEach((k) => {
     const h = WALL_H[k], pal = k === 'hi' ? [0xeef2f7, 0x9fb2cc, 0x7389a9] : k === 'lo' ? [0xcbd5e1, 0x94a3b8, 0x7d8da3] : [0xdbe4ee, 0xa8b8cf, 0x8497b3];
@@ -145,8 +145,8 @@ export function makeTextures(scene: Phaser.Scene) {
   box(g, 'bed_outpatient', 0.8, 8, 0xbfdbfe, 0x93c5fd, 0x60a5fa, (gg) => diamond(gg, 26, 14, 0.25, 0xffffff));
   box(g, 'bed_inpatient', 0.8, 6, 0xffffff, 0xe5e7eb, 0xcbd5e1, (gg) => { diamond(gg, 38, 18, 0.5, 0x86efac); diamond(gg, 24, 13, 0.22, 0xfef3c7); });
   box(g, 'desk', 1, 12, 0x9a6b3f, 0x7c5a3a, 0x654a30);
-  box(g, 'counter', 1, 14, 0x5eead4, 0x14b8a6, 0x0f766e);
-  box(g, 'bench', 0.7, 6, 0x60a5fa, 0x3b82f6, 0x2563eb);
+  box(g, 'counter', 1, 14, 0xa0c7bd, 0x6d9e92, 0x4b7a70);
+  box(g, 'bench', 0.7, 6, 0x9bbacb, 0x7396ad, 0x54758c);
   box(g, 'cabinet', 0.6, 34, 0xe2e8f0, 0x94a3b8, 0x64748b, (gg) => gg.fillStyle(0x38bdf8).fillRect(24, 16 + 12, 4, 8));
   box(g, 'console', 0.55, 18, 0x38bdf8, 0x475569, 0x334155);
   box(g, 'kiosk', 0.55, 26, 0xfacc15, 0x475569, 0x334155);

@@ -30,7 +30,7 @@ export function ManagePanel({ ctl }: { ctl: Controller }) {
         const avgWait = s.yearAcc.treated[svc] ? s.yearAcc.waitSum[svc] / s.yearAcc.treated[svc] : 0;
         return (
           <section className="card" key={svc}>
-            <h3>{svc === 'emergency' ? 'Emergency department' : 'Outpatient clinic'}</h3>
+            <h3>{svc === 'emergency' ? 'Emergency department' : svc === 'inpatient' ? 'Inpatient ward' : 'Outpatient clinic'}</h3>
             <div className="kv"><span>Staffed treatment posts</span><b>{posts.toFixed(2)} <small>(min of rooms, physicians, nurses)</small></b></div>
             <div className="kv"><span>Queue · in service · avg wait YTD</span><b>{d.queue.length} · {d.inService.length} · {hrs(avgWait)}</b></div>
             <Stepper label="Physicians" value={d.physicians} cost={`${usd(Math.round(a.costs.physicianSalaryCents * wage))}/yr`} onMinus={() => hireMsg(svc, 'physician', -1)} onPlus={() => hireMsg(svc, 'physician', 1)} />

@@ -10,7 +10,7 @@ export function Game({ ctl }: { ctl: Controller }) {
       const [{ default: Phaser }, { HospitalScene }] = await Promise.all([import('phaser'), import('./HospitalScene')]);
       if (dead || !ref.current) return;
       game = new Phaser.Game({
-        type: Phaser.AUTO, parent: ref.current, width: 960, height: 540, backgroundColor: '#0b1220', pixelArt: true, roundPixels: true,
+        type: Phaser.AUTO, parent: ref.current, width: 960, height: 540, backgroundColor: '#131e23', pixelArt: true, roundPixels: true,
         scale: { mode: Phaser.Scale.RESIZE, autoCenter: Phaser.Scale.CENTER_BOTH },
         scene: [HospitalScene], callbacks: { preBoot: (g) => g.registry.set('ctl', ctl) },
       });

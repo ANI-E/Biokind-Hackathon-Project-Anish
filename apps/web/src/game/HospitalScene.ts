@@ -51,13 +51,13 @@ export class HospitalScene extends Phaser.Scene {
       const p = proj(pr.x + 0.5, pr.y + 0.5), o = CUSTOM_ORIGIN[pr.tex] ?? [0.5, boxOrigin(BOX_H[pr.tex] ?? 0)];
       this.add.image(p.x, p.y + (pr.dy ?? 0), pr.tex).setOrigin(o[0], o[1]).setDepth(depthOf(pr.x + 0.5, pr.y + 0.5, pr.tex === 'monitor' ? 5 : pr.tex === 'flowers' ? -50 : 0));
     });
-    Object.values(ROOMS).forEach((r) => { const p = proj(r.x0 + 1.2, r.y0 + 0.9); this.add.text(p.x, p.y, r.label, { fontFamily: 'monospace', fontSize: '14px', color: '#0f172a', backgroundColor: '#ffffffcc', padding: { x: 3, y: 1 } }).setResolution(2).setOrigin(0.5).setDepth(9e5); });
-    const e = proj(ENTRANCE.x + 0.5, ENTRANCE.y + 0.5); this.add.text(e.x, e.y - 40, '▼ ENTRANCE', { fontFamily: 'monospace', fontSize: '14px', color: '#fff', backgroundColor: '#15803dcc', padding: { x: 4, y: 2 } }).setResolution(2).setOrigin(0.5).setDepth(9e5);
-    const w = proj(25, 8); this.wardSign = this.add.text(w.x, w.y, '', { fontFamily: 'monospace', fontSize: '14px', color: '#fef3c7', backgroundColor: '#7c2d12dd', padding: { x: 5, y: 3 }, align: 'center' }).setResolution(2).setOrigin(0.5).setDepth(9e5);
-    DEPTS.forEach((d) => { const s = queueSpots(d)[QUEUE_CAP - 1], p = proj(s.x + 0.5, s.y + 1.2); this.overflow[d] = this.add.text(p.x, p.y, '', { fontFamily: 'monospace', fontSize: '13px', color: '#7f1d1d', backgroundColor: '#fee2e2cc', padding: { x: 3, y: 1 } }).setResolution(2).setOrigin(0.5).setDepth(9e5); });
+    Object.values(ROOMS).forEach((r) => { const p = proj(r.x0 + 1.2, r.y0 + 0.9); this.add.text(p.x, p.y, r.label, { fontFamily: 'Arial, sans-serif', fontSize: '14px', color: '#0f172a', backgroundColor: '#edf1edee', padding: { x: 3, y: 1 } }).setResolution(2).setOrigin(0.5).setDepth(9e5); });
+    const e = proj(ENTRANCE.x + 0.5, ENTRANCE.y + 0.5); this.add.text(e.x, e.y - 40, '▼ ENTRANCE', { fontFamily: 'Arial, sans-serif', fontSize: '14px', color: '#fff', backgroundColor: '#315b4fee', padding: { x: 4, y: 2 } }).setResolution(2).setOrigin(0.5).setDepth(9e5);
+    const w = proj(25, 8); this.wardSign = this.add.text(w.x, w.y, '', { fontFamily: 'Arial, sans-serif', fontSize: '14px', color: '#fef3c7', backgroundColor: '#7c2d12dd', padding: { x: 5, y: 3 }, align: 'center' }).setResolution(2).setOrigin(0.5).setDepth(9e5);
+    DEPTS.forEach((d) => { const s = queueSpots(d)[QUEUE_CAP - 1], p = proj(s.x + 0.5, s.y + 1.2); this.overflow[d] = this.add.text(p.x, p.y, '', { fontFamily: 'Arial, sans-serif', fontSize: '13px', color: '#7f1d1d', backgroundColor: '#fee2e2cc', padding: { x: 3, y: 1 } }).setResolution(2).setOrigin(0.5).setDepth(9e5); });
     this.ring = this.add.graphics().setDepth(8e5);
     this.player = this.makePerson('admin', this.pg.x, this.pg.y);
-    this.prompt = this.add.text(0, 0, '', { fontFamily: 'monospace', fontSize: '15px', color: '#fff', backgroundColor: '#0f172aee', padding: { x: 5, y: 3 } }).setResolution(2).setDepth(9.5e5).setVisible(false);
+    this.prompt = this.add.text(0, 0, '', { fontFamily: 'Arial, sans-serif', fontSize: '15px', color: '#fff', backgroundColor: '#0f172aee', padding: { x: 5, y: 3 } }).setResolution(2).setDepth(9.5e5).setVisible(false);
     const cam = this.cameras.main; cam.setBounds(0, 0, WORLD_W, WORLD_H); cam.setZoom(0.72); cam.startFollow(this.player.spr, true, 0.12, 0.12);
     this.input.on('wheel', (_p: unknown, _o: unknown, _dx: number, dy: number) => cam.setZoom(clamp(cam.zoom - dy * 0.001, 0.55, 1.6)));
     this.input.on('pointerdown', (_p: Phaser.Input.Pointer, over: Phaser.GameObjects.GameObject[]) => {
@@ -106,7 +106,7 @@ export class HospitalScene extends Phaser.Scene {
       if (e.type === 'leave') { if (p) p.reason = e.reason; sfx.leave(); }
       else if (e.type === 'complete') {
         sfx.paid();
-        if (p && e.revenueCents > 0) { const s = proj(p.px, p.py); const tx = this.add.text(s.x, s.y - 30, `+$${Math.round(e.revenueCents / 100).toLocaleString('en-US')}`, { fontFamily: 'monospace', fontSize: '15px', color: '#bbf7d0', stroke: '#052e16', strokeThickness: 3 }).setResolution(2).setOrigin(0.5).setDepth(9.6e5);
+        if (p && e.revenueCents > 0) { const s = proj(p.px, p.py); const tx = this.add.text(s.x, s.y - 30, `+$${Math.round(e.revenueCents / 100).toLocaleString('en-US')}`, { fontFamily: 'Arial, sans-serif', fontSize: '15px', color: '#bbf7d0', stroke: '#052e16', strokeThickness: 3 }).setResolution(2).setOrigin(0.5).setDepth(9.6e5);
           this.tweens.add({ targets: tx, y: tx.y - 34, alpha: 0, duration: 1100, onComplete: () => tx.destroy() }); }
       }
     });

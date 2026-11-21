@@ -27,7 +27,11 @@ export default function App() {
       {ctl.isDemo && <div className="banner demo top">DEMO MODE: SYNTHETIC PLACEHOLDER DATA. MEPS CALIBRATION NOT YET LOADED.</div>}
       <TopBar ctl={ctl} />
       <main className="main">
-        <div className="stage"><Game ctl={ctl} /></div>
+        <div className="stage">
+          <div className="stage-heading"><h2>Hospital campus</h2><span className="status">{ctl.paused ? 'Simulation paused' : 'Simulation running'}</span></div>
+          <Game ctl={ctl} />
+          <p className="stage-help"><span><kbd>WASD</kbd> Move</span><span><kbd>E</kbd> Interact</span><span>Scroll to zoom · Click a patient to inspect</span></p>
+        </div>
         <aside className="side">
           <nav role="tablist">{TABS.map(([k, label]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{label}</button>)}</nav>
           {tab === 'manage' && <ManagePanel ctl={ctl} />}
