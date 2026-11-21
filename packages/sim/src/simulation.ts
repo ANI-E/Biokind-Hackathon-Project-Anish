@@ -1,27 +1,19 @@
 import { DEFAULT_ASSUMPTIONS, type Assumptions, type EventDef } from './assumptions';
-import { assetProvenance, type EventDist, type ModelAsset, type PaymentDist } from './assets';
+import type { EventDist, ModelAsset, PaymentDist } from './assets';
+import { arrivalProfiles } from './arrivals';
+import { buildSnapshot } from './snapshot';
+import { freshAcc, groupsOf, totalCosts, totalRevenue, zeroLedger, type YearAcc } from './stats';
 import { makeRng, next, pickCumulative, poisson, type RngState } from './rng';
 import {
-  LEDGER_CATEGORIES, PLAYABLE, type Action, type ActionResult, type ActiveVisit, type AnnualSnapshot, type Department,
-  type GroupStats, type LedgerCategory, type LedgerEntry, type LedgerTotals, type PayerGroup, type PlayableService,
-  type ServiceMap, type SimEvent, type SyntheticPatient, type Visit,
+  PLAYABLE, type Action, type ActionResult, type ActiveVisit, type AnnualSnapshot, type Department, type LedgerCategory, type LedgerEntry,
+  type LedgerTotals, type PlayableService, type ServiceMap, type SimEvent, type SyntheticPatient, type Visit,
 } from './types';
 
 export const START_YEAR = 2024;
 export const END_YEAR = 2044;
 const RING = 100;
 
-// diurnal arrival profiles (fractions per hour of day, normalised). Illustrative MODEL_ASSUMPTION.
-const ER_PROFILE = norm([2, 1.6, 1.4, 1.2, 1.2, 1.4, 1.8, 2.6, 3.6, 4.4, 4.8, 5, 5, 4.8, 4.6, 4.6, 4.8, 5, 5, 4.8, 4.2, 3.6, 3, 2.4]);
-function profileFor(service: PlayableService, a: Assumptions): number[] {
-  if (service === 'emergency') return ER_PROFILE;
-  if (service === 'inpatient') return norm(Array(24).fill(1));
-  const [o, c] = a.staffing.outpatient.openHours;
-  return norm(Array.from({ length: 24 }, (_, h) => (h >= o && h < c ? 1 : 0)));
-}
-function norm(a: number[]) { const s = a.reduce((x, y) => x + y, 0); return a.map((v) => v / s); }
-
-interface ServiceModel { cum: number[]; cellIdx: number[]; annualEvents: number; }
+interface ServiceModel { cum: number[]; annualEvents: number; perDay: number; }
 export interface Config { seed: number; scenarioId: string; assumptions: Assumptions; events?: boolean; }
 
 export interface SimState {
@@ -39,15 +31,6 @@ export interface SimState {
   decisionsThisYear: string[];
   actionLog: { tick: number; action: Action }[];
 }
-interface YearAcc {
-  arrivals: ServiceMap<number>; treated: ServiceMap<number>; unmet: ServiceMap<number>; waitSum: ServiceMap<number>;
-  byPayer: Record<string, GroupStats>; byIncome: Record<string, GroupStats>; oop: number; subsidized: number;
-}
-const gs = (): GroupStats => ({ arrivals: 0, treated: 0, unmet: 0, waitTicksSum: 0, oopCents: 0, subsidizedOopCents: 0 });
-const zeroLedger = (): LedgerTotals => Object.fromEntries(LEDGER_CATEGORIES.map((c) => [c, 0])) as LedgerTotals;
-const sm = (): ServiceMap<number> => ({ emergency: 0, outpatient: 0, inpatient: 0 });
-const freshAcc = (): YearAcc => ({ arrivals: sm(), treated: sm(), unmet: sm(), waitSum: sm(), byPayer: {}, byIncome: {}, oop: 0, subsidized: 0 });
-
 export function createInitialState(cfg: Partial<Config> & { seed: number }): SimState {
   const a = cfg.assumptions ?? DEFAULT_ASSUMPTIONS;
   const dept = (service: PlayableService, rooms: number, phys: number, nurses: number): Department =>
@@ -74,9 +57,10 @@ export class Simulation {
   private models: ServiceMap<ServiceModel> | null = null;
   private modelYear = -1;
   private oopShare: Record<string, number> = {};
+  private readonly profiles: ServiceMap<number[]>;
 
   constructor(asset: ModelAsset, state: SimState, assumptions: Assumptions = DEFAULT_ASSUMPTIONS) {
-    this.asset = asset; this.state = state; this.a = assumptions;
+    this.asset = asset; this.state = state; this.a = assumptions; this.profiles = arrivalProfiles(assumptions);
     for (const svc of PLAYABLE) for (const [py, d] of Object.entries(asset.payments[svc].byPayer)) {
       const fm = d.facilityPaymentCents.mean, om = d.facilityOutOfPocketCents.mean;
       this.oopShare[`${svc}:${py}`] = fm > 0 ? Math.min(1, Math.max(0, om / fm)) : 0;
@@ -102,7 +86,7 @@ export class Simulation {
       const cum: number[] = []; let acc = 0, expectedPerPerson = 0;
       cells.forEach((c, i) => { const m = (w[i] / tw) * c.ratesPerPersonYear[svc]; acc += m; cum.push(acc); expectedPerPerson += m; });
       const annual = this.population() * expectedPerPerson * idx(sc.utilizationDriftPerYear, n) * this.a.hospitalShare[svc] * (this.state.yearEvent?.arrivalMult[svc] ?? 1);
-      models[svc] = { cum: cum.map((x) => x + 1e-15), cellIdx: cells.map((_, i) => i), annualEvents: annual };
+      models[svc] = { cum: cum.map((x) => x + 1e-15), annualEvents: annual, perDay: annual / 365 };
     }
     this.models = models; this.modelYear = this.state.year;
   }
@@ -185,7 +169,9 @@ export class Simulation {
       }
       case 'setSubsidy': {
         if (!Number.isInteger(act.budgetCents) || act.budgetCents < 0) return { ok: false, error: 'Invalid budget.' };
-        s.subsidyBudgetCents = act.budgetCents; s.subsidyRemainingCents = act.budgetCents;
+        // Changing the fund adjusts what is left; re-selecting the same level must not refill it mid-year.
+        s.subsidyRemainingCents = Math.max(0, Math.min(act.budgetCents, s.subsidyRemainingCents + act.budgetCents - s.subsidyBudgetCents));
+        s.subsidyBudgetCents = act.budgetCents;
         log(`financial assistance fund $${(act.budgetCents / 100).toLocaleString()}/yr`); return { ok: true };
       }
     }
@@ -240,19 +226,20 @@ export class Simulation {
       const hour = s.tick % 24;
       // 1. completions
       for (const svc of PLAYABLE) {
-        const d = s.departments[svc], still: ActiveVisit[] = [];
-        for (const av of d.inService) {
-          if (av.endTick <= s.tick) this.complete(av, emit); else still.push(av);
+        const d = s.departments[svc]; let kept = 0;   // in-place compaction keeps completion order without allocating
+        for (let i = 0; i < d.inService.length; i++) {
+          const av = d.inService[i];
+          if (av.endTick <= s.tick) this.complete(av, emit); else d.inService[kept++] = av;
         }
-        d.inService = still;
+        d.inService.length = kept;
       }
       // 2. arrivals
       for (const svc of PLAYABLE) {
-        const lam = (this.models![svc].annualEvents / 365) * profileFor(svc, a)[hour];
+        const lam = this.models![svc].perDay * this.profiles[svc][hour];
         const k = poisson(s.rng, lam);
         for (let i = 0; i < k; i++) {
           const v = this.makeVisit(svc); s.departments[svc].queue.push(v);
-          s.yearAcc.arrivals[svc]++; grp(s.yearAcc, v).forEach((g) => g.arrivals++); emit?.({ type: 'arrive', tick: s.tick, visit: v });
+          s.yearAcc.arrivals[svc]++; const [gp, gi] = groupsOf(s.yearAcc, v); gp.arrivals++; gi.arrivals++; emit?.({ type: 'arrive', tick: s.tick, visit: v });
         }
       }
       // 3. service starts (FIFO)
@@ -262,23 +249,21 @@ export class Simulation {
         while (free > 0 && d.queue.length > 0) {
           const v = d.queue.shift()!; const dur = svc === 'inpatient' ? v.treatmentTicks : Math.max(1, Math.round(v.treatmentTicks * pmult));
           d.inService.push({ visit: v, startTick: s.tick, endTick: s.tick + dur }); free--;
-          const wait = s.tick - v.arrivalTick; s.yearAcc.waitSum[svc] += wait; grp(s.yearAcc, v).forEach((g) => (g.waitTicksSum += wait));
+          const wait = s.tick - v.arrivalTick, [gp, gi] = groupsOf(s.yearAcc, v); s.yearAcc.waitSum[svc] += wait; gp.waitTicksSum += wait; gi.waitTicksSum += wait;
           emit?.({ type: 'start', tick: s.tick, visit: v, waitTicks: wait });
         }
         // 4. unmet demand: transfer / left without being seen after waiting too long
         const lim = svc === 'emergency' ? a.queue.emergencyDiversionWaitTicks : svc === 'inpatient' ? a.queue.inpatientDiversionWaitTicks : a.queue.outpatientLeaveWaitTicks;
-        const keep: Visit[] = [];
-        for (const v of d.queue) {
-          if (s.tick - v.arrivalTick >= lim) {
-            s.yearAcc.unmet[svc]++; grp(s.yearAcc, v).forEach((g) => g.unmet++);
-            if (svc !== 'outpatient') this.book('cost.penalty', Math.round(a.queue.divertedPenaltyCents[svc] * idx(a.scenario.generalInflationPerYear, yrs(s))), v.id);
-            emit?.({ type: 'leave', tick: s.tick, visit: v, reason: svc === 'outpatient' ? 'left_unseen' : 'diverted' });
-          } else keep.push(v);
+        let expired = 0;   // the queue is FIFO (arrival-ordered), so patients past the limit are always a prefix
+        while (expired < d.queue.length && s.tick - d.queue[expired].arrivalTick >= lim) expired++;
+        if (expired) for (const v of d.queue.splice(0, expired)) {
+          s.yearAcc.unmet[svc]++; const [gp, gi] = groupsOf(s.yearAcc, v); gp.unmet++; gi.unmet++;
+          if (svc !== 'outpatient') this.book('cost.penalty', Math.round(a.queue.divertedPenaltyCents[svc] * idx(a.scenario.generalInflationPerYear, yrs(s))), v.id);
+          emit?.({ type: 'leave', tick: s.tick, visit: v, reason: svc === 'outpatient' ? 'left_unseen' : 'diverted' });
         }
-        d.queue = keep;
       }
-      // 5. daily costs at midnight
-      if (hour === 0 && s.tick > s.yearStartTick) this.dailyCosts();
+      // 5. daily costs at the end of each day (365 charges per year)
+      if (hour === 23) this.dailyCosts();
       s.tick++; ran++;
       // 6. year end
       if (s.tick - s.yearStartTick >= a.hoursPerYear) {
@@ -286,6 +271,8 @@ export class Simulation {
         if (opts.stopAtYearEnd) break;
       }
     }
+    // a hospital that goes bankrupt mid-year still gets a (partial) snapshot, so the game-over screen and score have data
+    if (s.bankrupt && s.snapshots.at(-1)?.year !== s.year) s.snapshots.push(buildSnapshot(s, this.asset, this.population()));
     return { ticksRun: ran, yearClosed: closed };
   }
 
@@ -303,7 +290,8 @@ export class Simulation {
     }
     const oop = v.expectedOutOfPocketCents - forgiven;
     s.yearAcc.treated[svc]++; s.yearAcc.oop += oop; s.yearAcc.subsidized += forgiven;
-    grp(s.yearAcc, v).forEach((g) => { g.treated++; g.oopCents += oop; g.subsidizedOopCents += forgiven; });
+    const [gp, gi] = groupsOf(s.yearAcc, v);
+    for (const g of [gp, gi]) { g.treated++; g.oopCents += oop; g.subsidizedOopCents += forgiven; }
     emit?.({ type: 'complete', tick: s.tick, visit: v, revenueCents: v.expectedFacilityPaymentCents });
   }
 
@@ -324,35 +312,7 @@ export class Simulation {
   }
 
   private closeYear() {
-    const s = this.state, acc = s.yearAcc;
-    const rev = LEDGER_CATEGORIES.filter((k) => k.startsWith('revenue.')).reduce((t, k) => t + s.ledger[k], 0);
-    const exp = LEDGER_CATEGORIES.filter((k) => k.startsWith('cost.')).reduce((t, k) => t + s.ledger[k], 0);
-    const treatedAll = acc.treated.emergency + acc.treated.outpatient + acc.treated.inpatient;
-    const waitAll = acc.waitSum.emergency + acc.waitSum.outpatient + acc.waitSum.inpatient;
-    const dep = s.departments;
-    const snap: AnnualSnapshot = {
-      year: s.year, seed: s.config.seed, modelVersion: this.asset.modelVersion, mode: this.asset.provenanceKind,
-      populationSize: this.population(),
-      arrivals: { ...acc.arrivals },
-      treated: { ...acc.treated },
-      unmet: { ...acc.unmet },
-      avgWaitTicks: treatedAll ? waitAll / treatedAll : 0,
-      avgWaitTicksByService: { emergency: acc.treated.emergency ? acc.waitSum.emergency / acc.treated.emergency : 0,
-        outpatient: acc.treated.outpatient ? acc.waitSum.outpatient / acc.treated.outpatient : 0,
-        inpatient: acc.treated.inpatient ? acc.waitSum.inpatient / acc.treated.inpatient : 0 },
-      revenueCents: rev, expensesCents: exp, netCents: rev - exp,
-      cashStartCents: s.cashStartOfYearCents, cashCents: s.cashCents, ledger: { ...s.ledger },
-      staffCount: PLAYABLE.reduce((t, k) => t + dep[k].nurses + dep[k].physicians, 0),
-      roomCount: PLAYABLE.reduce((t, k) => t + dep[k].roomSlots, 0),
-      physicians: PLAYABLE.reduce((t, k) => t + dep[k].physicians, 0), nurses: PLAYABLE.reduce((t, k) => t + dep[k].nurses, 0),
-      unmetDemand: acc.unmet.emergency + acc.unmet.outpatient + acc.unmet.inpatient,
-      byPayer: acc.byPayer, byIncome: acc.byIncome, patientOopCents: acc.oop, subsidizedOopCents: acc.subsidized,
-      avgOopPerVisitCents: treatedAll ? Math.round(acc.oop / treatedAll) : 0,
-      decisions: [...s.decisionsThisYear], event: s.yearEvent?.label ?? null,
-      provenance: [...assetProvenance(this.asset),
-        { kind: 'MODEL_ASSUMPTION', sourceId: 'default-assumptions.json', method: 'Hospital share, staffing, unit costs, scenario drift', assumptions: ['Not survey findings'] },
-        { kind: 'SIMULATED', sourceId: 'sim', method: 'Queue/capacity outcomes after player decisions' }],
-    };
+    const s = this.state, snap = buildSnapshot(s, this.asset, this.population());
     s.snapshots.push(snap);
     if (s.year >= END_YEAR) { s.finished = true; return; }
     // transition
@@ -376,9 +336,7 @@ export class Simulation {
   /** Invariant check: cash_end == cash_start + revenue - costs for the in-progress year. */
   checkInvariants(): string[] {
     const s = this.state, errs: string[] = [];
-    const rev = LEDGER_CATEGORIES.filter((k) => k.startsWith('revenue.')).reduce((t, k) => t + s.ledger[k], 0);
-    const cost = LEDGER_CATEGORIES.filter((k) => k.startsWith('cost.')).reduce((t, k) => t + s.ledger[k], 0);
-    if (s.cashCents !== s.cashStartOfYearCents + rev - cost) errs.push('cash != start + revenue - costs');
+    if (s.cashCents !== s.cashStartOfYearCents + totalRevenue(s.ledger) - totalCosts(s.ledger)) errs.push('cash != start + revenue - costs');
     for (const svc of PLAYABLE) {
       const d = s.departments[svc];
       if (d.roomSlots < 0 || d.nurses < 0 || d.physicians < 0) errs.push(`${svc}: negative capacity`);
@@ -388,10 +346,6 @@ export class Simulation {
   }
 }
 
-function grp(acc: YearAcc, v: Visit): GroupStats[] {
-  const p = (acc.byPayer[v.patient.payer] ??= gs()), i = (acc.byIncome[v.patient.incomeBand] ??= gs());
-  return [p, i];
-}
 export function serialize(s: SimState): string { return JSON.stringify(s); }
 export function deserialize(json: string): SimState {
   const s = JSON.parse(json) as SimState;
@@ -399,7 +353,6 @@ export function deserialize(json: string): SimState {
   s.actionLog ??= []; s.events ??= false; s.yearEvent ??= null;
   return s;
 }
-export type { PayerGroup };
 
 /** Re-run the same decisions (same ticks) under another seed, for the given number of years. Empty log = no-intervention control. */
 export function replay(asset: ModelAsset, seed: number, log: { tick: number; action: Action }[], years: number, assumptions: Assumptions = DEFAULT_ASSUMPTIONS, scenarioId = 'replay', events = false): Simulation {

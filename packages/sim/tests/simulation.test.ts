@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { END_YEAR, Simulation, scorecard, replay, summarize, buildQuestions, coachTips, makeDemoAsset, serialize, validateAsset, type Action } from '../src';
+import { END_YEAR, Simulation, makeRng, next, scorecard, replay, summarize, buildQuestions, coachTips, makeDemoAsset, serialize, validateAsset, type Action } from '../src';
 import { loadAsset } from './helpers';
 
 const asset = loadAsset();
@@ -224,5 +224,53 @@ describe('coach one-click suggestions', () => {
     expect(s.state.departments.inpatient.roomSlots).toBe(6);
     expect(coachTips(s).some((t) => t.id === 'ward-closed')).toBe(false);
     expect(s.checkInvariants()).toEqual([]);
+  });
+});
+
+describe('bug regressions', () => {
+  it('re-selecting the same assistance fund level does not refill it mid-year', () => {
+    const s = Simulation.create(asset, 8, { ...Simulation.create(asset, 1).a, startingCashCents: 10 ** 11 });
+    s.applyAction({ type: 'setSubsidy', budgetCents: 10_000_000 }); s.advance(1500);
+    const left = s.state.subsidyRemainingCents; expect(left).toBeLessThan(10_000_000);
+    s.applyAction({ type: 'setSubsidy', budgetCents: 10_000_000 }); expect(s.state.subsidyRemainingCents).toBe(left);
+    s.applyAction({ type: 'setSubsidy', budgetCents: 12_000_000 }); expect(s.state.subsidyRemainingCents).toBe(left + 2_000_000);
+    s.applyAction({ type: 'setSubsidy', budgetCents: 0 }); expect(s.state.subsidyRemainingCents).toBe(0);
+  });
+  it('payroll is charged for all 365 days of every year', () => {
+    const s = Simulation.create(asset, 2, { ...Simulation.create(asset, 1).a, startingCashCents: 10 ** 11 });
+    const c = s.a.costs, annual = Object.values(s.state.departments).reduce((t, d) => t + d.physicians * c.physicianSalaryCents + d.nurses * c.nurseSalaryCents, 0);
+    s.runToYearEnd(); expect(Math.abs(s.state.snapshots[0].ledger['cost.payroll'] - annual)).toBeLessThanOrEqual(365);
+  });
+  it('a hospital that goes bankrupt in its first year still produces a snapshot for the game-over screen', () => {
+    const s = Simulation.create(asset, 1); s.state.cashCents = -10_000_000_000; s.runToEnd();
+    expect(s.state.bankrupt).toBe(true); expect(s.state.snapshots.length).toBe(1);
+    expect(s.state.snapshots[0].year).toBe(2024); expect(s.state.snapshots[0].cashCents).toBeLessThan(0);
+    s.advance(100); expect(s.state.snapshots.length).toBe(1);   // no duplicate partial snapshots
+  });
+});
+
+describe('randomised stress', () => {
+  it('random decisions over many seeds never break money, capacity or queue invariants', () => {
+    const rich = { ...Simulation.create(asset, 1).a, startingCashCents: 10 ** 11 };
+    for (let seed = 1; seed <= 10; seed++) {
+      const s = Simulation.create(asset, seed, rich, 'fuzz', seed % 2 === 0), r = makeRng(seed * 977);
+      const pick = <T,>(xs: T[]) => xs[Math.floor(next(r) * xs.length)];
+      while (!s.state.finished && !s.state.bankrupt && s.state.tick < 8760 * 6) {
+        const svc = pick(['emergency', 'outpatient', 'inpatient'] as const);
+        s.applyAction(pick<Action>([
+          { type: 'hire', service: svc, role: 'nurse', count: 1 + Math.floor(next(r) * 4) }, { type: 'fire', service: svc, role: 'physician', count: 1 },
+          { type: 'addRoom', service: svc }, { type: 'setProcessLevel', level: Math.floor(next(r) * 4) }, { type: 'setSubsidy', budgetCents: Math.floor(next(r) * 3) * 10_000_000 },
+        ]));
+        s.advance(1 + Math.floor(next(r) * 1500));
+        expect(s.checkInvariants()).toEqual([]);
+        for (const d of Object.values(s.state.departments)) {
+          expect(d.queue.every((v, i) => i === 0 || d.queue[i - 1].arrivalTick <= v.arrivalTick)).toBe(true);   // FIFO order, relied on by the timeout logic
+          expect(d.inService.length).toBeLessThanOrEqual(Math.max(d.roomSlots, 0) + 1);
+        }
+        const refs = s.state.recent.filter((e) => e.category.startsWith('revenue.') && e.category !== 'revenue.grant').map((e) => e.ref);
+        expect(new Set(refs).size).toBe(refs.length);
+      }
+      expect(JSON.stringify(s.state.snapshots.map(({ event: _e, ...x }) => x))).not.toMatch(/NaN|Infinity|null/);
+    }
   });
 });

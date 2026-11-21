@@ -1,7 +1,6 @@
 import { audio, sfx } from './audio';
-import { buildQuestions, replay, scorecard, summarize, Simulation, type Question, type Scorecard, makeDemoAsset, validateAsset, deserialize, serialize, END_YEAR, type Action, type ActionResult, type AnnualSnapshot, type ModelAsset, type SimEvent, type Visit } from '@hospital/sim';
+import { buildQuestions, replay, scorecard, summarize, Simulation, type Question, type Scorecard, makeDemoAsset, validateAsset, deserialize, serialize, type Action, type ActionResult, type AnnualSnapshot, type ModelAsset, type SimEvent, type Visit } from '@hospital/sim';
 
-export type { };
 const SAVE_KEY = 'ht2044-save-v1';
 const files = import.meta.glob('../../../packages/model-assets/derived/meps_baseline.json', { eager: true, import: 'default' }) as Record<string, unknown>;
 
@@ -58,18 +57,27 @@ export class Controller {
   stop() { cancelAnimationFrame(this.raf); }
   private frame(t: number) {
     const dt = Math.min(0.25, (t - this.last) / 1000); this.last = t;
-    if (!this.paused && !this.report && !this.briefing && !this.sim.state.finished && !this.sim.state.bankrupt) {
-      this.acc += dt * TICKS_PER_SECOND_AT_1X * this.speed;
-      const n = Math.floor(this.acc);
-      if (n > 0) { this.acc -= n; this.run(n); }
-    }
-    this.uiAcc += dt; if (this.uiAcc > 0.1) { this.uiAcc = 0; this.emit(); }
+    if (this.paused || this.report || this.briefing || this.gameOver) return;   // nothing changes while idle: no clock, no re-render
+    this.acc += dt * TICKS_PER_SECOND_AT_1X * this.speed;
+    const n = Math.floor(this.acc);
+    if (n > 0) { this.acc -= n; this.run(n); }
+    this.uiAcc += dt; if (this.uiAcc > 0.2) { this.uiAcc = 0; this.emit(); }
   }
   private run(n: number) {
     const onEvent = (e: SimEvent) => { if (this.events.length < 400) this.events.push(e); this.log(e); };
-    const r = this.sim.advance(n, { onEvent, stopAtYearEnd: true });
-    if (r.yearClosed) this.onYearClosed();
-    if (this.sim.state.bankrupt) { this.paused = true; this.say('The hospital has gone bankrupt (cash negative for over 60 days).'); this.report = this.sim.state.snapshots.at(-1) ?? null; }
+    this.afterAdvance(this.sim.advance(n, { onEvent, stopAtYearEnd: true }).yearClosed);
+  }
+  /** Single place that turns "the simulation moved" into the year-end report or the game-over screen. */
+  private afterAdvance(yearClosed: boolean) {
+    const st = this.sim.state;
+    if (st.bankrupt) {
+      this.paused = true; this.report = st.snapshots.at(-1) ?? null; this.save(); sfx.leave();
+      this.say('The hospital has gone bankrupt (cash negative for over 60 days).');
+    } else if (yearClosed) {
+      const snap = st.snapshots.at(-1)!; this.paused = true; this.report = snap; this.save(); sfx.year();
+      this.say(`Year ${snap.year} closed: net ${(snap.netCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })}`);
+    } else return;
+    this.emit();
   }
   private log(e: SimEvent) {
     if (e.type !== 'leave') return;
@@ -77,11 +85,6 @@ export class Controller {
     this.say(v.service === 'emergency' ? `ER over capacity: patient transferred/left unseen (${py})`
       : v.service === 'inpatient' ? `No ward capacity: admission transferred elsewhere (${py})` : `Clinic backlog: patient left unseen (${py})`);
   }
-  private onYearClosed() {
-    this.paused = true; this.report = this.sim.state.snapshots.at(-1)!; this.save(); sfx.year();
-    this.say(`Year ${this.report.year} closed: net ${(this.report.netCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })}`);
-  }
-
   // ---- player-facing API ----
   toggleMute() { audio.muted = this.muted = !this.muted; this.emit(); }
   /** Yearly MEPS briefing: predict a real statistic, see the answer with its CI and source, earn a small grant if right. */
@@ -106,9 +109,11 @@ export class Controller {
   togglePause() { if (!this.report && !this.briefing) this.paused = !this.paused; this.emit(); }
   setSpeed(s: (typeof SPEEDS)[number]) { this.speed = s; this.paused = false; this.emit(); }
   act(a: Action): ActionResult { const r = this.sim.applyAction(a); if (!r.ok) this.say(`Action failed: ${r.error}`); this.emit(); return r; }
-  simToYearEnd() { const y = this.sim.state.year; this.paused = true; this.events = [];
-    this.sim.runToYearEnd(); if (this.sim.state.snapshots.at(-1)?.year === y) this.onYearClosed(); else if (this.sim.state.bankrupt) this.run(0); this.emit(); }
-  simTo2044() { this.paused = true; this.events = []; this.sim.runToEnd(); this.report = this.sim.state.snapshots.at(-1) ?? null; this.save(); this.emit(); }
+  simToYearEnd() {
+    this.paused = true; this.events = []; const before = this.sim.state.snapshots.length;
+    this.sim.runToYearEnd(); this.afterAdvance(this.sim.state.snapshots.length > before); this.emit();
+  }
+  simTo2044() { this.paused = true; this.events = []; this.sim.runToEnd(); this.afterAdvance(this.sim.state.finished); this.emit(); }
   dismissReport() {
     if (this.sim.state.finished || this.sim.state.bankrupt) return; // end state stays
     this.report = null; this.openBriefing(); this.emit();
@@ -129,4 +134,3 @@ export class Controller {
   }
   exportJson(): string { return serialize(this.sim.state); }
 }
-export { END_YEAR };
